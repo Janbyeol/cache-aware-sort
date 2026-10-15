@@ -9,6 +9,26 @@
 
 ---
 
+## Feedback & Contributions
+
+**PLEASE roast my code. Seriously. I'm begging you. 😭🙏**
+
+I'm just a university student trying to figure things out, and I still have a lot to learn (and probably a lot of terrible code to fix).
+
+If you find **anything** wrong, inefficient, ugly, confusing, or just plain stupid in my code, PLEASE let me know.
+
+I don't care if you're a beginner or a veteran. **Any feedback is welcome. Literally ANYTHING.**
+
+- Found a bug? Please tell me.
+- Know a better approach? PLEASE tell me.
+- Think my code is a mess? You're probably right. Tell me why. 💀
+
+Open an Issue, start a Discussion, or submit a Pull Request. Whatever works for you!
+
+**Every bit of criticism helps me grow as a developer. Please don't hold back. ❤️**
+
+---
+
 ## 💡 Motivation & How the Idea Started
 
 While studying sorting algorithms, a fundamental question crossed my mind:
@@ -26,3 +46,7 @@ This repository documents the journey of turning these raw ideas into working C+
 
 > [!NOTE]
 > 🚧 This README is a work in progress and will be updated regularly.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

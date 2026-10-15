@@ -1,5 +1,7 @@
 # Cache-Aware Hybrid Sort Study (64B Cache-Line Optimization)
 
+**English** | [한국어](README.ko.md)
+
 > **🤖 AI Collaboration Disclosure**
 > 
 > I am an undergraduate student currently learning algorithms and computer architecture. As a beginner who is not yet fluent in writing low-level C++ optimization code, **I actively utilized Generative AI (ChatGPT and Gemini) to implement the C++20 source code, refactor the structure, and build the benchmarking suite.**

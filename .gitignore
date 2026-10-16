@@ -51,3 +51,8 @@ test_8b
 bench_4b
 bench_8b
 results/
+vs/
+bin/
+.vs/
+*.sln
+*.vcxproj*

@@ -55,6 +55,8 @@ prof_4b
 prof_8b
 **/prof_4b
 **/prof_8b
+**/pure_perf_4b
+**/pure_perf_8b
 perf.data*
 cachegrind.out.*
 results/

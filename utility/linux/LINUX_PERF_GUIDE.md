@@ -8,8 +8,10 @@
 
 | 파일 경로 | 역할 |
 | :--- | :--- |
-| `utility/linux/profile_one.cpp` | 단일 알고리즘 프로파일링 러너 (`prctl`을 통해 데이터 생성 구간의 `perf` 카운터 노이즈 차단) |
-| `utility/linux/run_perf_csv.sh` | `prof_4b` / `prof_8b` 자동 빌드 + 전 시나리오 `perf stat` 실행 + `.csv` 및 `.md` 결과 표 자동 생성 스크립트 |
+| **`utility/linux/pure_perf_bench.cpp`** | **(권장) 커널 `perf_event_open` 직접 제어 벤치마크** — 데이터 생성(`generate_game_workload`) 및 메모리 복사(`memcpy`) 구간을 100% 배제하고 **순수 정렬 함수 실행 구간의 하드웨어 카운터만 정밀 측정** |
+| **`utility/linux/run_pure_perf.sh`** | **(권장)** `pure_perf_4b` / `pure_perf_8b` 자동 빌드 및 실행 후 `pure_cache_results.csv` + `pure_cache_results.md` 생성 |
+| `utility/linux/profile_one.cpp` | 외부 `perf stat` 명령어와 함께 쓰는 단일 알고리즘 실행기 |
+| `utility/linux/run_perf_csv.sh` | 외부 `perf stat` 래퍼 스크립트 |
 | `utility/linux/LINUX_PERF_GUIDE.md` | 리눅스 프로파일링 명령어 사용 설명서 |
 
 ---
@@ -25,29 +27,38 @@ sudo sysctl -w kernel.kptr_restrict=0
 
 > **참고:** Windows에서 작성된 `.sh` 파일을 리눅스로 옮겼을 때 줄바꿈(`CRLF`) 오류가 나면 아래 한 줄로 변환 후 실행하세요:
 > ```bash
-> sed -i 's/\r$//' utility/linux/run_perf_csv.sh && chmod +x utility/linux/run_perf_csv.sh
+> sed -i 's/\r$//' utility/linux/*.sh && chmod +x utility/linux/*.sh
 > ```
 
 ---
 
-## 3. 자동 히트율 계산 및 CSV / MD 저장 스크립트 (`utility/linux/run_perf_csv.sh`)
+## 3. [권장] 데이터 생성 노이즈 0% 순수 정렬 측정 (`utility/linux/run_pure_perf.sh`)
+
+리눅스 커널 시스템 콜(`perf_event_open` + `ioctl(PERF_EVENT_IOC_ENABLE / DISABLE)`)을 C++ 코드 내부에서 직접 제어하여, **데이터 생성(`generate_game_workload`)과 버퍼 복사(`memcpy`) 동안에는 하드웨어 카운터를 완전히 꺼두고 오직 정렬 함수가 도는 순간만 100% 순수 측정**합니다.
+
+- **문법:** `./utility/linux/run_pure_perf.sh [원소개수_N] [반복횟수] [저장할_CSV파일명]`
+
+```bash
+# 기본 실행 (N=1,000,000, 3회 평균 -> pure_cache_results.csv 및 pure_cache_results.md 저장)
+./utility/linux/run_pure_perf.sh
+
+# 캐시 계층 크기별로 각각 다른 파일 이름으로 리눅스 서버 로컬에 저장하기
+./utility/linux/run_pure_perf.sh 2048     10 pure_l1_2k.csv      # L1 캐시 크기 (2,048개, 10회 평균)
+./utility/linux/run_pure_perf.sh 131072   5  pure_l2_131k.csv    # L2 캐시 크기 (131,072개, 5회 평균)
+./utility/linux/run_pure_perf.sh 1000000  3  pure_l3_1m.csv      # L3/DRAM 경계 (1,000,000개, 3회 평균)
+./utility/linux/run_pure_perf.sh 10000000 3  pure_dram_10m.csv   # 대용량 DRAM (10,000,000개, 3회 평균)
+```
+
+---
+
+## 4. 외부 `perf stat` 래퍼 스크립트 (`utility/linux/run_perf_csv.sh`)
 
 프로젝트 루트(`~/cache-aware-sort`) 또는 `utility/linux/` 폴더 어디서 실행하든 자동으로 경로를 찾아 `utility/linux/prof_4b`, `utility/linux/prof_8b`를 빌드하고 측정을 수행합니다.
 
 - **문법:** `./utility/linux/run_perf_csv.sh [원소개수_N] [반복횟수] [저장할_CSV파일명]`
 
 ```bash
-# 도움말 확인
-./utility/linux/run_perf_csv.sh --help
-
-# 기본 실행 (N=1,000,000, 3회 평균 -> cache_hit_results.csv 및 cache_hit_results.md 생성)
 ./utility/linux/run_perf_csv.sh
-
-# 캐시 계층 크기별로 각각 다른 파일 이름으로 리눅스 서버 로컬에 저장하기
-./utility/linux/run_perf_csv.sh 2048     10 perf_l1_2k.csv      # L1 캐시 크기 (2,048개, 10회 평균)
-./utility/linux/run_perf_csv.sh 131072   5  perf_l2_131k.csv    # L2 캐시 크기 (131,072개, 5회 평균)
-./utility/linux/run_perf_csv.sh 1000000  3  perf_l3_1m.csv      # L3/DRAM 경계 (1,000,000개, 3회 평균)
-./utility/linux/run_perf_csv.sh 10000000 3  perf_dram_10m.csv   # 대용량 DRAM (10,000,000개, 3회 평균)
 ```
 
 ---

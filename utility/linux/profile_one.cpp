@@ -34,12 +34,12 @@ int main(int argc, char** argv) {
     // 2. Enable hardware performance counters strictly for the sorting algorithm
     PERF_ENABLE();
 
-    if      (algo == "std")    std_sort_wrapper(data.data(), n);
-    else if (algo == "stable") std_stable_sort_wrapper(data.data(), n);
-    else if (algo == "idea1")  cache_leaf_quick_sort(data.data(), n);
-    else if (algo == "idea2")  mean_pivot_quick_sort(data.data(), n);
-    else if (algo == "idea3")  boundary_trimmed_merge_sort(data.data(), n);
-    else if (algo == "idea4")  tiled_pingpong_merge_sort(data.data(), n);
+    if      (algo == "std"    || algo == "std::sort")              std_sort_wrapper(data.data(), n);
+    else if (algo == "stable" || algo == "std::stable_sort")       std_stable_sort_wrapper(data.data(), n);
+    else if (algo == "idea1"  || algo == "cache_leaf_quick")       cache_leaf_quick_sort(data.data(), n);
+    else if (algo == "idea2"  || algo == "mean_pivot_quick")       mean_pivot_quick_sort(data.data(), n);
+    else if (algo == "idea3"  || algo == "boundary_trimmed_merge") boundary_trimmed_merge_sort(data.data(), n);
+    else if (algo == "idea4"  || algo == "tiled_pingpong_merge")   tiled_pingpong_merge_sort(data.data(), n);
     else {
         PERF_DISABLE();
         std::cerr << "Unknown algo: " << algo << "\n";

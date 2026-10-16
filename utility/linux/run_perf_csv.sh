@@ -65,12 +65,19 @@ SCEN_NAMES=(
     "6_Organ_Pipe_Symmetric"
 )
 
-ALGOS=("std" "stable" "idea3" "idea4")
+ALGOS=(
+    "std::sort"
+    "std::stable_sort"
+    "cache_leaf_quick"
+    "mean_pivot_quick"
+    "boundary_trimmed_merge"
+    "tiled_pingpong_merge"
+)
 EVENTS="cycles,instructions,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,branches,branch-misses"
 
 echo "[Run] N=$N, Repeats=$REPEATS -> 로컬 저장: $CSV_FILE 및 $MD_FILE"
-printf "%-9s | %-29s | %-6s | %10s | %10s | %11s | %6s\n" "Type" "Scenario" "Algo" "L1 Hit(%)" "LLC Hit(%)" "Br Miss(%)" "IPC"
-echo "-------------------------------------------------------------------------------------------------------"
+printf "%-9s | %-29s | %-22s | %10s | %10s | %11s | %6s\n" "Type" "Scenario" "Algorithm" "L1 Hit(%)" "LLC Hit(%)" "Br Miss(%)" "IPC"
+echo "-----------------------------------------------------------------------------------------------------------------------"
 
 for TYPE_INFO in "4B_Int32:$PROF_4B" "8B_Record:$PROF_8B"; do
     DTYPE="${TYPE_INFO%%:*}"
@@ -120,12 +127,12 @@ for TYPE_INFO in "4B_Int32:$PROF_4B" "8B_Record:$PROF_8B"; do
 
             # 터미널 출력
             echo "$ROW" | awk -F',' '{
-                printf "%-9s | %-29s | %-6s | %10s | %10s | %11s | %6s\n", $1, $2, $4, $5, $7, $10, $11
+                printf "%-9s | %-29s | %-22s | %10s | %10s | %11s | %6s\n", $1, $2, $4, $5, $7, $10, $11
             }'
         done
     done
 done
 
-echo "-------------------------------------------------------------------------------------------------------"
+echo "-----------------------------------------------------------------------------------------------------------------------"
 echo "[Done] CSV 저장 완료: $(pwd)/$CSV_FILE"
 echo "[Done] MD  저장 완료: $(pwd)/$MD_FILE"

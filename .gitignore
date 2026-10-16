@@ -42,3 +42,12 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+### Benchmark & Build Outputs
+*.csv
+*.log
+test_4b
+test_8b
+bench_4b
+bench_8b
+results/

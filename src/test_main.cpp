@@ -1,34 +1,16 @@
-#include "benchmark_utils.hpp"
 #include "hybrid_sorts.hpp"
 #include <algorithm>
-#include <array>
 #include <iostream>
 #include <random>
 
 using namespace hsort;
-
-using SortFn = void (*)(Item*, std::size_t);
-
-struct AlgorithmEntry {
-    const char* name;
-    SortFn      fn;
-};
-
-constexpr std::array<AlgorithmEntry, 7> ALGORITHMS = {{
-    {"Pure QuickSort",          pure_quick_sort},
-    {"std::sort",               std_sort_wrapper},
-    {"std::stable_sort",        std_stable_sort_wrapper},
-    {"64B Leaf QuickSort",      cache_leaf_quick_sort},
-    {"Mean-Pivot QuickSort",    mean_pivot_quick_sort},
-    {"Boundary-Trimmed Merge",  boundary_trimmed_merge_sort},
-    {"Tiled Ping-Pong Merge",   tiled_pingpong_merge_sort}
-}};
 
 int main() {
     std::cout << "[Unit Test] Format: " << FORMAT_NAME
               << " (Item = " << sizeof(Item) << "B, Leaf = " << LEAF_SIZE
               << ", Tile = " << TILE_SIZE << ")\n";
 
+    const auto& algorithms = get_all_sort_methods();
     std::mt19937_64 rng(20261015);
     std::size_t total_checks = 0;
 
@@ -39,36 +21,42 @@ int main() {
     };
 
     for (std::size_t n : edge_sizes) {
-        for (int s = 0; s < 4; ++s) {
+        for (int s = 0; s < static_cast<int>(Scenario::Count); ++s) {
             AlignedBuffer source(n), work(n);
             generate_game_workload(source.data(), n, 1, static_cast<Scenario>(s), rng());
             ReferenceData ref = build_reference(source.data(), n, 1);
 
-            for (std::size_t a = 0; a < ALGORITHMS.size(); ++a) {
+            for (std::size_t a = 0; a < algorithms.size(); ++a) {
                 std::copy_n(source.data(), n, work.data());
-                ALGORITHMS[a].fn(work.data(), n);
+                algorithms[a].fn(work.data(), n);
                 verify_sorted_batch(work.data(), n, 1, ref, static_cast<std::uint8_t>(a + 1));
                 ++total_checks;
             }
         }
     }
 
-    // 2. 극단적 중복 키 및 역순 노이즈 무작위 스트레스 테스트 (300회)
+    // 2. 극단적 중복 키, 음수 반올림 함정 케이스, 역순 노이즈 무작위 스트레스 테스트 (300회)
     for (int trial = 0; trial < 300; ++trial) {
         const std::size_t n = 10 + (rng() % 3500);
         AlignedBuffer source(n), work(n);
 
         for (std::size_t i = 0; i < n; ++i) {
-            const std::int32_t key = (trial % 2 == 0)
-                ? static_cast<std::int32_t>(rng() % 7) - 3 // 극단적 중복 키 (-3..3)
-                : static_cast<std::int32_t>(n - i);        // 역순 베이스
+            std::int32_t key = 0;
+            if (trial % 3 == 0) {
+                key = static_cast<std::int32_t>(rng() % 7) - 3; // 극단적 중복 키 (-3..3)
+            } else if (trial % 3 == 1) {
+                key = static_cast<std::int32_t>(n - i);         // 역순 베이스
+            } else {
+                // 음수 나눗셈 버림 함정 케이스 (대부분 -5, 단 하나만 -4)
+                key = (i == n / 2) ? -4 : -5;
+            }
             source.data()[i] = make_item(key, static_cast<std::uint32_t>(i));
         }
 
         ReferenceData ref = build_reference(source.data(), n, 1);
-        for (std::size_t a = 0; a < ALGORITHMS.size(); ++a) {
+        for (std::size_t a = 0; a < algorithms.size(); ++a) {
             std::copy_n(source.data(), n, work.data());
-            ALGORITHMS[a].fn(work.data(), n);
+            algorithms[a].fn(work.data(), n);
             verify_sorted_batch(work.data(), n, 1, ref, static_cast<std::uint8_t>(a + 1));
             ++total_checks;
         }

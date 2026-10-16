@@ -32,7 +32,7 @@ Open an Issue, start a Discussion, or submit a Pull Request. Whatever works for 
 ## 💡 Motivation & How the Idea Started
 
 While studying sorting algorithms, a fundamental question crossed my mind:
-*"Quick Sort has a worst-case time complexity of $O(N^2)$ and shares the same $O(N \log N)$ average complexity as Heap Sort or Merge Sort. Why is it so much faster in practice?"*
+*"Quick Sort has a worst-case time complexity of O(N^2) and shares the same O(N\log N) average complexity as Heap Sort or Merge Sort. Why is it so much faster in practice?"*
 
 After learning that Quick Sort's practical speed comes from **Cache Locality**—which leads to higher CPU **Cache Hit** rates—I connected this hardware concept with the block-partitioning philosophy of **Timsort** and formulated my initial hypothesis:
 

@@ -46,10 +46,17 @@ $RECYCLE.BIN/
 ### Benchmark & Build Outputs
 *.csv
 *.log
+*_results.md
 test_4b
 test_8b
 bench_4b
 bench_8b
+prof_4b
+prof_8b
+**/prof_4b
+**/prof_8b
+perf.data*
+cachegrind.out.*
 results/
 vs/
 bin/

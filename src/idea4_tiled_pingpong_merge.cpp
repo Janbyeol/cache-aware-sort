@@ -5,12 +5,27 @@ namespace hsort {
 namespace {
 
 // ============================================================================
-// [Idea 4] 거시적 경향 감지 + L1 타일링 + 경계 트리밍 + 핑퐁 병합 정렬
-//   - Idea 3에서 배열이 커질 때 발생하는 두 가지 병목(캐시 방출, 매 단계 memcpy)을 해결:
-//     1. 8KiB L1 캐시 타일(TILE_SIZE) 단위로 묶어 타일 내부에서 64B 정렬과 병합을 먼저 끝냄
-//     2. 원본 배열(data)과 보조 버퍼(buffer)를 번갈아 쓰는 Ping-Pong Merge로 중간 복사 제거
-//     3. 블록 크기가 커졌을 때 경계 트리밍을 이진 탐색(upper_bound / lower_bound)으로 가속
+// [Idea 4] Global Trend Probe + 8KiB L1 Tiling + Ping-Pong Merge Sort
+//
+// How this evolved from Idea 3:
+//   While Idea 3 excels on nearly-sorted data, profiling large random arrays (N = 1,000,000)
+//   revealed two bottlenecks:
+//     1. Cache Eviction: Sorting all 64B blocks across the entire array before the first
+//        merge pass evicts earlier blocks from the L1 cache.
+//     2. Copy Overhead: Copying merged elements back to `data` via `memcpy` on every level
+//        wastes memory bandwidth when the overlap window is large.
+//
+//   Idea 4 solves both problems:
+//     - L1 Cache Tiling (8 KiB): We process the array in 8 KiB tiles (TILE_SIZE) so the
+//       entire tile and its auxiliary buffer stay hot in L1D cache across local merge passes.
+//     - Ping-Pong Merging: Instead of copying back to `data` after every pass, we alternate
+//       the source and destination roles between `data` and `buffer`.
+//     - Binary Boundary Trimming: For larger blocks, linear boundary scanning is replaced
+//       with `std::upper_bound` / `std::lower_bound` to find the overlap window in O(log W).
 // ============================================================================
+
+// Lightweight O(1) probe (32 equidistant samples) to detect globally ascending or
+// descending arrays before allocating the auxiliary buffer.
 inline bool probe_and_handle_global_trend(Item* data, std::size_t n) noexcept {
     const std::size_t samples = std::min<std::size_t>(32, n - 1);
     std::size_t desc_adj   = 0;
@@ -24,7 +39,7 @@ inline bool probe_and_handle_global_trend(Item* data, std::size_t n) noexcept {
         prev_idx = idx;
     }
 
-    // 거의 역순인 배열 감지 시 양 끝 대칭 스왑 패스 수행
+    // If the array is overwhelmingly descending, flip inverted pairs from both ends
     const bool mostly_descending = (data[0] > data[n - 1]) &&
                                    (desc_adj * 8 >= samples * 7) &&
                                    (desc_spans * 8 >= (samples - 1) * 7);
@@ -46,12 +61,13 @@ inline bool probe_and_handle_global_trend(Item* data, std::size_t n) noexcept {
 
 inline void pingpong_merge_pair(const Item* __restrict src, Item* __restrict dst,
                                 std::size_t begin, std::size_t mid, std::size_t end) noexcept {
+    // Fast-path: if already ordered across the boundary, bulk-copy to the ping-pong target
     if (mid >= end || src[mid - 1] <= src[mid]) {
         std::memcpy(dst + begin, src + begin, (end - begin) * sizeof(Item));
         return;
     }
 
-    // 이진 탐색으로 실제 겹치는 경계 구간 [trim_left, trim_right) 산출
+    // Binary search for the exact inverted boundary window [trim_left, trim_right)
     const std::size_t trim_left = static_cast<std::size_t>(
         std::upper_bound(src + begin, src + mid, src[mid]) - src
     );
@@ -59,6 +75,7 @@ inline void pingpong_merge_pair(const Item* __restrict src, Item* __restrict dst
         std::lower_bound(src + mid, src + end, src[mid - 1]) - src
     );
 
+    // Bulk-copy the non-overlapping outer regions directly
     if (trim_left > begin) {
         std::memcpy(dst + begin, src + begin, (trim_left - begin) * sizeof(Item));
     }
@@ -66,6 +83,7 @@ inline void pingpong_merge_pair(const Item* __restrict src, Item* __restrict dst
         std::memcpy(dst + trim_right, src + trim_right, (end - trim_right) * sizeof(Item));
     }
 
+    // Merge only the overlapping interior window
     detail::bidirectional_branchless_merge(src, dst, trim_left, mid, trim_right);
 }
 
@@ -86,19 +104,20 @@ void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
         return;
     }
 
-    // 1단계: 거시적 역순/정렬 프로브
+    // Step 1: Check for global ascending/descending trends
     if (probe_and_handle_global_trend(data, n)) return;
 
     AlignedBuffer buffer(n);
 
-    // 2단계: L1 캐시 타일(8 KiB) 내부에서 64B 리프 정렬 및 로컬 핑퐁 병합 완료
+    // Step 2: L1 Cache Tiling (8 KiB per tile)
+    // Sort 64B leaves and complete all local ping-pong merges while the tile is hot in L1D.
     for (std::size_t tile_begin = 0; tile_begin < n; tile_begin += TILE_SIZE) {
         const std::size_t tile_end = std::min(n, tile_begin + TILE_SIZE);
 
         for (std::size_t first = tile_begin; first < tile_end; first += LEAF_SIZE) {
             const std::size_t last = std::min(tile_end, first + LEAF_SIZE);
 
-            // 미소 블록 앞부분의 엄격한 내림차순 구간을 즉시 뒤집기
+            // Reverse any strictly descending prefix inside the 64B leaf before insertion sort
             std::size_t desc_end = first + 1;
             while (desc_end < last && data[desc_end] < data[desc_end - 1]) {
                 ++desc_end;
@@ -116,14 +135,14 @@ void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
             std::swap(src, dst);
         }
 
-        // 타일 완료 시점에 결과물이 항상 buffer 쪽에 놓이도록 패리티 맞춤
+        // Ensure every finished tile lands in `buffer` so global merge starts from a uniform source
         if (src != buffer.data()) {
             std::memcpy(buffer.data() + tile_begin, src + tile_begin,
                         (tile_end - tile_begin) * sizeof(Item));
         }
     }
 
-    // 3단계: 타일 간 전역 핑퐁 병합 (Global Ping-Pong Merge)
+    // Step 3: Global Ping-Pong Merge across sorted L1 tiles
     Item* src = buffer.data();
     Item* dst = data;
     for (std::size_t width = TILE_SIZE; width < n; width *= 2) {

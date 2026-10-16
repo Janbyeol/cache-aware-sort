@@ -3,9 +3,15 @@
 namespace hsort {
 
 // ============================================================================
-// [Idea 1] 64B 캐시 라인 리프 제한 + 선형 삽입 하이브리드 퀵 정렬
-//   - 배열을 끝까지(크기 1) 재귀 분할하지 않고, 정확히 64B 캐시 라인(LEAF_SIZE) 이하로
-//     내려가면 재귀를 멈춘 뒤 L1 캐시 내부에서 명령어가 최소화된 선형 삽입 정렬로 마무리합니다.
+// [Idea 1] 64-Byte Cache-Line Cutoff + Linear Insertion Quick Sort
+//
+// Why this idea?
+//   A standard CPU fetches memory in 64-byte cache lines (16x int32_t or 8x 8B records).
+//   Once a subarray is small enough to fit inside a single 64-byte cache line (LEAF_SIZE),
+//   partitioning it further with Quick Sort gives zero cache-hit advantage and only adds
+//   recursion and branch misprediction overhead.
+//   So we stop recursion at LEAF_SIZE and finish each micro-block in L1 cache using
+//   a tight linear insertion sort.
 // ============================================================================
 void cache_leaf_quick_sort(Item* data, std::size_t n) noexcept {
     detail::quick_sort_impl<LEAF_SIZE>(data, n);

@@ -11,21 +11,21 @@ COMMON_SRCS := \
 
 all: test_4b test_8b bench_4b bench_8b
 
-# 1. 유닛 테스트 빌드 (4바이트 키 / 8바이트 레코드)
+# 1. Unit Test Targets (4-byte key vs. 8-byte key+id record)
 test_4b: $(COMMON_SRCS) src/test_main.cpp
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 test_8b: $(COMMON_SRCS) src/test_main.cpp
 	$(CXX) $(CXXFLAGS) -DBENCH_RECORD=1 $^ -o $@
 
-# 2. 벤치마크 빌드 (4바이트 키 / 8바이트 레코드)
+# 2. Benchmark Targets (4-byte key vs. 8-byte key+id record)
 bench_4b: $(COMMON_SRCS) src/benchmark_main.cpp
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 bench_8b: $(COMMON_SRCS) src/benchmark_main.cpp
 	$(CXX) $(CXXFLAGS) -DBENCH_RECORD=1 $^ -o $@
 
-# 실행 타깃
+# Runner Targets
 test: test_4b test_8b
 	./test_4b
 	./test_8b

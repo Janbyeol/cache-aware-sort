@@ -13,6 +13,7 @@
 
 namespace hsort {
 
+// Registry of all sorting algorithms evaluated by the test and benchmark runners.
 const std::vector<MethodInfo>& get_all_sort_methods() {
     static const std::vector<MethodInfo> methods = {
         {"pure_quick",           pure_quick_sort},
@@ -52,6 +53,7 @@ inline constexpr std::int32_t squared_distance(std::int32_t x, std::int32_t y, s
 }
 } // anonymous namespace
 
+// Generates synthetic workloads modeling both game-engine spatial sorting and classic distributions.
 void generate_game_workload(Item* output, std::size_t n, std::size_t batch,
                             Scenario scenario, std::uint64_t seed) {
     std::mt19937_64 rng(seed);
@@ -70,6 +72,7 @@ void generate_game_workload(Item* output, std::size_t n, std::size_t batch,
         auto by_key = [](const Point3D& a, const Point3D& b) { return a.key < b.key; };
 
         if (scenario == Scenario::NextFrameMotion) {
+            // Sort as if from the previous frame, then apply small position jitter
             std::sort(points.begin(), points.end(), by_key);
             for (auto& p : points) {
                 auto jitter = [&]() { return static_cast<std::int32_t>(rng() % 11) - 5; };
@@ -79,22 +82,24 @@ void generate_game_workload(Item* output, std::size_t n, std::size_t batch,
                 p.key = squared_distance(p.x, p.y, p.z);
             }
         } else if (scenario == Scenario::Append5PctNew) {
+            // 95% already sorted objects + 5% newly spawned unsorted objects at the end
             const std::size_t sorted_prefix = n - (n / 20);
             std::sort(points.begin(), points.begin() + sorted_prefix, by_key);
         } else if (scenario == Scenario::DistanceBuckets) {
+            // Quantize distances into ~300 buckets to create heavy key duplication
             for (auto& p : points) p.key /= 1'000'000;
         } else if (scenario == Scenario::MostlyDescending) {
+            // Reverse-sorted array with 1% random adjacent swaps
             std::sort(points.begin(), points.end(), [](const Point3D& a, const Point3D& b) {
                 return a.key > b.key;
             });
-            // 1% 미세 스왑 노이즈
             const std::size_t swaps = std::max<std::size_t>(1, n / 100);
             for (std::size_t s = 0; s < swaps && n >= 2; ++s) {
                 const std::size_t idx = rng() % (n - 1);
                 std::swap(points[idx], points[idx + 1]);
             }
         } else if (scenario == Scenario::GaussianNormal) {
-            // 중심극한정리(CLT)를 이용한 고속 가우시안 정규분포 (-40000 ~ +40000)
+            // Bell-curve distribution (-40000 to +40000) approximated via Central Limit Theorem
             for (std::size_t i = 0; i < n; ++i) {
                 std::int32_t sum = 0;
                 for (int k = 0; k < 4; ++k) {
@@ -103,6 +108,7 @@ void generate_game_workload(Item* output, std::size_t n, std::size_t batch,
                 points[i].key = sum;
             }
         } else if (scenario == Scenario::OrganPipe) {
+            // Symmetric mountain shape: ascending first half, descending second half
             std::sort(points.begin(), points.end(), by_key);
             std::vector<Point3D> pipe(n);
             std::size_t l = 0, r = n;
@@ -119,6 +125,7 @@ void generate_game_workload(Item* output, std::size_t n, std::size_t batch,
     }
 }
 
+// Builds ground-truth sorted keys (and payload mappings when BENCH_RECORD is enabled).
 ReferenceData build_reference(const Item* source, std::size_t n, std::size_t batch) {
     ReferenceData ref;
     ref.sorted_keys.resize(n * batch);
@@ -140,6 +147,7 @@ ReferenceData build_reference(const Item* source, std::size_t n, std::size_t bat
     return ref;
 }
 
+// Verifies that the output matches std::sort and that no 8-byte records were lost or corrupted.
 void verify_sorted_batch(const Item* work, std::size_t n, std::size_t batch,
                          ReferenceData& ref, std::uint8_t stamp_id) {
     for (std::size_t b = 0; b < batch; ++b) {
@@ -185,7 +193,7 @@ void run_benchmark_suite() {
     std::ofstream csv(std::string(FORMAT_NAME) + "_summary.csv");
     csv << "scenario,n,method,median_us,speedup_vs_std_sort\n";
 
-    // 워밍업
+    // Warm up instruction and data caches before timing
     {
         AlignedBuffer warm(8192);
         generate_game_workload(warm.data(), 8192, 1, Scenario::Fresh3DDistances, 42);
@@ -222,6 +230,7 @@ void run_benchmark_suite() {
                 for (std::size_t m = 0; m < methods.size(); ++m) {
                     std::memcpy(work.data(), source.data(), n * batch * sizeof(Item));
 
+                    // Standard C++20 compiler fence to prevent dead-code elimination or reordering
                     std::atomic_signal_fence(std::memory_order_seq_cst);
                     const auto start = Clock::now();
                     for (std::size_t b = 0; b < batch; ++b) {

@@ -5,12 +5,15 @@ namespace hsort {
 namespace {
 
 // ============================================================================
-// [Idea 2] 무임승차 합산(Piggybacked Summation) 평균 피벗 예측 퀵 정렬
-//   - 분할(Partition) 과정에서 어차피 모든 원소를 읽으므로, 좌/우 파티션으로 분류되는
-//     원소들의 합(Sum)과 최솟값/최댓값을 레지스터에서 함께 누적합니다.
-//   - 다음 재귀 단계에서는 추가 메모리 접근 없이 계산된 평균(Mean)을 피벗으로 사용합니다.
-//   - [Bug Fix] 정수 나눗셈 버림이나 이상치(Outlier)로 인해 평균 피벗이 구간의
-//     최솟값/최댓값 경계에 걸려 한쪽 파티션이 0개가 되는 무한 재귀 버그를 완벽히 방지합니다.
+// [Idea 2] Piggybacked Summation (Mean-Pivot Prediction) Quick Sort
+//
+// Why this idea?
+//   During a Quick Sort partition pass, the CPU already reads every element in the subarray.
+//   What if we "piggyback" on this memory scan to accumulate the sum (and min/max bounds)
+//   of the left and right partitions in registers?
+//   Then, in the next recursive step, we can immediately use the exact arithmetic mean
+//   (sum / count) as our next pivot—predicting the center of the distribution without
+//   touching memory again.
 // ============================================================================
 struct SumPartitionResult {
     std::size_t  split;
@@ -26,7 +29,7 @@ HSORT_ALWAYS_INLINE SumPartitionResult sum_partition(Item* __restrict data, std:
     std::ptrdiff_t left  = -1;
     std::ptrdiff_t right = static_cast<std::ptrdiff_t>(n);
 
-    // 고전 Hoare 분할로 안전하게 좌/우 파티션 경계(split) 확정
+    // 1. Standard Hoare partition to divide [0, split) and [split, n)
     for (;;) {
         do { ++left;  } while (data[left]  < pivot);
         do { --right; } while (data[right] > pivot);
@@ -36,7 +39,7 @@ HSORT_ALWAYS_INLINE SumPartitionResult sum_partition(Item* __restrict data, std:
 
     const std::size_t split = static_cast<std::size_t>(right + 1);
 
-    // L1 캐시에 방금 로드된 좌/우 구간의 합계 및 최대/최소 경계 산출
+    // 2. Accumulate sum and min/max bounds for both partitions while data is hot in cache
     std::int64_t left_sum  = 0;
     std::int32_t left_min  = get_key(data[0]);
     std::int32_t left_max  = left_min;
@@ -60,13 +63,14 @@ HSORT_ALWAYS_INLINE SumPartitionResult sum_partition(Item* __restrict data, std:
     return {split, left_sum, right_sum, left_min, left_max, right_min, right_max};
 }
 
-// 구간의 평균값을 계산하되, Hoare 분할이 절대 한쪽(0 : N)으로 쏠리지 않도록
-// [min_key, max_key - 1] 범위 안으로 안전하게 클램핑한 피벗을 반환합니다.
+// Computes the mean pivot safely.
+// Integer division truncates toward zero, which on negative numbers (e.g., nineteen -5s and one -4)
+// can yield mean == max_key (-99 / 20 == -4). In Hoare partitioning, a pivot equal to max_key
+// can send all elements to the left partition (split == count), causing infinite recursion.
+// Clamping the mean to [min_key, max_key - 1] guarantees forward progress on every step.
 HSORT_ALWAYS_INLINE Item make_safe_mean_pivot(std::int64_t sum, std::size_t count,
                                               std::int32_t min_key, std::int32_t max_key) noexcept {
     std::int64_t mean = sum / static_cast<std::int64_t>(count);
-    // 음수 나눗셈 등에서 mean이 max_key 이상이 되면 data[right] > pivot 조건이 모두 거짓이 되어
-    // split == count가 되는 무한 재귀가 발생할 수 있으므로 상한을 max_key - 1로 제한
     if (mean >= max_key) mean = static_cast<std::int64_t>(max_key) - 1;
     if (mean <  min_key) mean = static_cast<std::int64_t>(min_key);
     return make_item(static_cast<std::int32_t>(mean));
@@ -80,7 +84,7 @@ void mean_quick_sort_impl(Item* data, std::size_t n, Item pivot) noexcept {
 
     const SumPartitionResult part = sum_partition(data, n, pivot);
 
-    // 1. 좌측 부분 배열 정렬 (모든 키가 동일하면 이미 정렬된 상태이므로 즉시 종료)
+    // Sort left partition (skip immediately if all keys are identical: left_min == left_max)
     if (part.split <= LEAF_SIZE) {
         detail::insertion_sort_leaf(data, part.split);
     } else if (part.left_min < part.left_max) {
@@ -90,7 +94,7 @@ void mean_quick_sort_impl(Item* data, std::size_t n, Item pivot) noexcept {
         mean_quick_sort_impl(data, part.split, next_left_pivot);
     }
 
-    // 2. 우측 부분 배열 정렬 (모든 키가 동일하면 이미 정렬된 상태이므로 즉시 종료)
+    // Sort right partition (skip immediately if all keys are identical: right_min == right_max)
     const std::size_t right_count = n - part.split;
     if (right_count <= LEAF_SIZE) {
         detail::insertion_sort_leaf(data + part.split, right_count);

@@ -21,7 +21,8 @@
 namespace hsort {
 
 // ============================================================================
-// 1. 정렬 대상 원소 타입 정의 (컴파일 옵션 -DBENCH_RECORD 유무로 4B / 8B 전환)
+// 1. Element Type Definition (4B int32_t vs. 8B Key+ID Record)
+//    Compile with -DBENCH_RECORD=1 to test 8-byte key-value payloads.
 // ============================================================================
 #ifdef BENCH_RECORD
 struct alignas(8) DistanceRecord {
@@ -66,15 +67,18 @@ inline constexpr Item make_item(std::int32_t key, std::uint32_t id = 0) noexcept
 }
 
 // ============================================================================
-// 2. 하드웨어 캐시 계층 상수 (64B Cache Line & 8KiB L1 Tile)
+// 2. Hardware Cache Hierarchy Constants
+//    - CACHE_LINE_BYTES (64B): Standard CPU cache line size (16x 4B or 8x 8B)
+//    - L1_TILE_BYTES (8KiB):   Working set size that comfortably fits in L1D
+//                              alongside its auxiliary ping-pong merge buffer.
 // ============================================================================
 constexpr std::size_t CACHE_LINE_BYTES = 64;
-constexpr std::size_t LEAF_SIZE        = CACHE_LINE_BYTES / sizeof(Item); // 4B -> 16개, 8B -> 8개
+constexpr std::size_t LEAF_SIZE        = CACHE_LINE_BYTES / sizeof(Item); // 16 items (4B) or 8 items (8B)
 constexpr std::size_t L1_TILE_BYTES    = 8192;                            // 8 KiB
-constexpr std::size_t TILE_SIZE        = L1_TILE_BYTES / sizeof(Item);    // 4B -> 2048개, 8B -> 1024개
+constexpr std::size_t TILE_SIZE        = L1_TILE_BYTES / sizeof(Item);    // 2048 items (4B) or 1024 items (8B)
 
 // ============================================================================
-// 3. 64바이트 캐시 라인 경계 정렬 메모리 버퍼 (RAII)
+// 3. 64-Byte Cache-Line Aligned Scratch Buffer (RAII)
 // ============================================================================
 class AlignedBuffer {
 public:
@@ -103,7 +107,7 @@ private:
 };
 
 // ============================================================================
-// 4. 공통 인라인 커널 (각 정렬 소스 파일에서 공유)
+// 4. Shared Low-Level Kernels
 // ============================================================================
 namespace detail {
 
@@ -112,7 +116,7 @@ HSORT_ALWAYS_INLINE Item median_of_three(Item a, Item b, Item c) noexcept {
     return (a < c) ? a : std::max(b, c);
 }
 
-// 64B 캐시 라인(16개 또는 8개 원소) 내부를 처리하는 고속 선형 삽입 정렬
+// Fast linear insertion sort for micro-blocks that already reside in a single 64B cache line.
 HSORT_ALWAYS_INLINE void insertion_sort_leaf(Item* __restrict data, std::size_t n) noexcept {
     for (std::size_t i = 1; i < n; ++i) {
         const Item key = data[i];
@@ -125,7 +129,7 @@ HSORT_ALWAYS_INLINE void insertion_sort_leaf(Item* __restrict data, std::size_t 
     }
 }
 
-// 고전적인 호어 분할 (Hoare Partition)
+// Classic Hoare partition scheme.
 HSORT_ALWAYS_INLINE std::size_t hoare_partition(Item* __restrict data, std::size_t n, Item pivot) noexcept {
     std::ptrdiff_t left  = -1;
     std::ptrdiff_t right = static_cast<std::ptrdiff_t>(n);
@@ -156,8 +160,10 @@ inline void quick_sort_impl(Item* data, std::size_t n) noexcept {
     quick_sort_impl<Cutoff>(data + split, n - split);
 }
 
-// 양방향 분기 제거 병합 (Bidirectional Branchless Merge)
-// 전면 포인터(최솟값 ->)와 후면 포인터(최댓값 <-)를 동시에 이동시켜 ILP 2배 확보
+// Bidirectional Branchless Merge:
+// Merges [begin, mid) and [mid, end) from `src` into `dst`.
+// By picking the minimum from the front (->) and the maximum from the back (<-) simultaneously
+// using branchless conditional moves (cmov), we break serial data dependencies and double ILP.
 inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __restrict dst,
                                            std::size_t begin, std::size_t mid, std::size_t end) noexcept {
     std::size_t l_fwd   = begin, l_bwd   = mid;
@@ -165,10 +171,11 @@ inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __r
     std::size_t out_fwd = begin, out_bwd = end;
 
     while (l_fwd < l_bwd && r_fwd < r_bwd) {
+        // Number of pairs we can process without checking for range exhaustion mid-loop
         const std::size_t safe_pairs = std::min(l_bwd - l_fwd, r_bwd - r_fwd);
 
         for (std::size_t s = 0; s < safe_pairs; ++s) {
-            // 1. 앞쪽에서 최솟값 선택 (cmov 유도, 동일 키일 때 좌측 우선 선택)
+            // 1. Front pointer: pick the smaller element (advances left-to-right ->)
             const Item lv         = src[l_fwd];
             const Item rv         = src[r_fwd];
             const bool take_right = (rv < lv);
@@ -176,7 +183,8 @@ inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __r
             l_fwd                += !take_right;
             r_fwd                += take_right;
 
-            // 2. 뒤쪽에서 최댓값 선택 (동일 키일 때 우측 우선 선택하여 안정성 보장)
+            // 2. Back pointer: pick the larger element (advances right-to-left <-)
+            //    Completely independent of the front pointer, enabling parallel execution per cycle.
             const Item lb        = src[l_bwd - 1];
             const Item rb        = src[r_bwd - 1];
             const bool take_left = (lb > rb);
@@ -186,6 +194,7 @@ inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __r
         }
     }
 
+    // Copy any remaining unmerged elements in the middle
     if (l_fwd < l_bwd) {
         std::memcpy(dst + out_fwd, src + l_fwd, (l_bwd - l_fwd) * sizeof(Item));
     } else if (r_fwd < r_bwd) {
@@ -196,28 +205,28 @@ inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __r
 } // namespace detail
 
 // ============================================================================
-// 5. 정렬 알고리즘 공개 API (각 아이디어별 개별 소스 파일에 구현)
+// 5. Public Sorting APIs (Implemented in separate files per idea)
 // ============================================================================
 
-// [Baselines] 비교군 정렬 (src/baseline_sorts.cpp)
+// [Baselines] Reference sorting algorithms (src/baseline_sorts.cpp)
 void pure_quick_sort(Item* data, std::size_t n) noexcept;
 void std_sort_wrapper(Item* data, std::size_t n) noexcept;
 void std_stable_sort_wrapper(Item* data, std::size_t n);
 
-// [Idea 1] 64B 캐시 라인 리프 제한 + 선형 삽입 하이브리드 퀵 정렬 (src/idea1_cache_leaf_quick.cpp)
+// [Idea 1] 64B Cache-Line Cutoff + Linear Insertion Hybrid Quick Sort (src/idea1_cache_leaf_quick.cpp)
 void cache_leaf_quick_sort(Item* data, std::size_t n) noexcept;
 
-// [Idea 2] 무임승차 합산(Summation) 평균 피벗 예측 퀵 정렬 (src/idea2_mean_pivot_quick.cpp)
+// [Idea 2] Piggybacked Summation Mean-Pivot Quick Sort (src/idea2_mean_pivot_quick.cpp)
 void mean_pivot_quick_sort(Item* data, std::size_t n) noexcept;
 
-// [Idea 3] 64B 블록 정렬 + 역방향 교차 포인터 경계 트리밍 병합 정렬 (src/idea3_boundary_trimmed_merge.cpp)
+// [Idea 3] 64B Micro-Block Sort + Cross-Pointer Boundary-Trimmed Merge Sort (src/idea3_boundary_trimmed_merge.cpp)
 void boundary_trimmed_merge_sort(Item* data, std::size_t n);
 
-// [Idea 4] 거시적 경향 감지 + L1 타일링 + 이진 트리밍 + 핑퐁 병합 정렬 (src/idea4_tiled_pingpong_merge.cpp)
+// [Idea 4] Global Trend Probe + 8KiB L1 Tiling + Ping-Pong Merge Sort (src/idea4_tiled_pingpong_merge.cpp)
 void tiled_pingpong_merge_sort(Item* data, std::size_t n);
 
 // ============================================================================
-// 6. 벤치마크 및 검증 유틸리티 API (src/benchmark_api.cpp)
+// 6. Benchmark & Verification API (src/benchmark_api.cpp)
 // ============================================================================
 using SortFn = void (*)(Item*, std::size_t);
 
@@ -226,17 +235,16 @@ struct MethodInfo {
     SortFn      fn;
 };
 
-// 벤치마크 및 테스트에서 공통으로 순회할 정렬 함수 목록 반환
 const std::vector<MethodInfo>& get_all_sort_methods();
 
 enum class Scenario : int {
-    Fresh3DDistances = 0, // 완전 무작위 3D 거리제곱 (Uniform 3D coords)
-    NextFrameMotion  = 1, // 이전 프레임 정렬 후 ±5cm 미세 이동 (Nearly Sorted)
-    Append5PctNew    = 2, // 앞쪽 95% 정렬 + 뒤쪽 5% 신규 스폰 (Sorted Prefix + Random Tail)
-    DistanceBuckets  = 3, // 0..300 구간 다중 중복 키 (Many Duplicates)
-    MostlyDescending = 4, // 역순 정렬 베이스 + 1% 미세 노이즈 (Reverse / Descending)
-    GaussianNormal   = 5, // 평균 중심 정규분포 (Bell-curve / Normal Distribution)
-    OrganPipe        = 6, // 오르간 파이프 분포 (오름차순 후 내림차순 산 모양)
+    Fresh3DDistances = 0, // Uniformly random 3D squared distances
+    NextFrameMotion  = 1, // Pre-sorted from previous frame + small position jitter (Nearly Sorted)
+    Append5PctNew    = 2, // 95% sorted prefix + 5% newly spawned random tail
+    DistanceBuckets  = 3, // Quantized distance buckets (High duplicate keys)
+    MostlyDescending = 4, // Reverse-sorted array with 1% random swap noise
+    GaussianNormal   = 5, // Bell-curve normal distribution (CLT sum)
+    OrganPipe        = 6, // Symmetric mountain distribution (Ascending first half, Descending second half)
     Count            = 7
 };
 
@@ -258,7 +266,6 @@ ReferenceData build_reference(const Item* source, std::size_t n, std::size_t bat
 void verify_sorted_batch(const Item* work, std::size_t n, std::size_t batch,
                          ReferenceData& ref, std::uint8_t stamp_id);
 
-// 전체 벤치마크 스위트 실행 및 CSV 저장 API
 void run_benchmark_suite();
 
 } // namespace hsort

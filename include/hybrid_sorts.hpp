@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -85,6 +86,9 @@ public:
     explicit AlignedBuffer(std::size_t count)
         : size_(count) {
         const std::size_t alloc_count = (count > 0) ? count : 1;
+        if (alloc_count > std::numeric_limits<std::size_t>::max() / sizeof(Item)) {
+            throw std::bad_array_new_length();
+        }
         data_ = static_cast<Item*>(
             ::operator new[](alloc_count * sizeof(Item), std::align_val_t{CACHE_LINE_BYTES})
         );
@@ -116,7 +120,7 @@ HSORT_ALWAYS_INLINE Item median_of_three(Item a, Item b, Item c) noexcept {
     return (a < c) ? a : std::max(b, c);
 }
 
-// Fast linear insertion sort for micro-blocks that already reside in a single 64B cache line.
+// Linear insertion sort for small leaves; size alone does not imply cache residency or alignment.
 HSORT_ALWAYS_INLINE void insertion_sort_leaf(Item* __restrict data, std::size_t n) noexcept {
     for (std::size_t i = 1; i < n; ++i) {
         const Item key = data[i];
@@ -163,7 +167,8 @@ inline void quick_sort_impl(Item* data, std::size_t n) noexcept {
 // Bidirectional Branchless Merge:
 // Merges [begin, mid) and [mid, end) from `src` into `dst`.
 // By picking the minimum from the front (->) and the maximum from the back (<-) simultaneously
-// using branchless conditional moves (cmov), we break serial data dependencies and double ILP.
+// using conditional selection to expose two directional dependency chains. Instruction selection
+// and any resulting ILP improvement depend on the compiler and target.
 inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __restrict dst,
                                            std::size_t begin, std::size_t mid, std::size_t end) noexcept {
     std::size_t l_fwd   = begin, l_bwd   = mid;
@@ -184,7 +189,7 @@ inline void bidirectional_branchless_merge(const Item* __restrict src, Item* __r
             r_fwd                += take_right;
 
             // 2. Back pointer: pick the larger element (advances right-to-left <-)
-            //    Completely independent of the front pointer, enabling parallel execution per cycle.
+            //    This direction maintains its own pointers and output position.
             const Item lb        = src[l_bwd - 1];
             const Item rb        = src[r_bwd - 1];
             const bool take_left = (lb > rb);

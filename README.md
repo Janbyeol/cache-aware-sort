@@ -45,17 +45,23 @@ This repository documents the journey of turning these raw ideas into working C+
 
 ## Key Hardware Performance Highlights (`perf_event_open`)
 
-> All relative percentages (`+n%`, `-n%`) below are compared against `std::sort` executed on the exact same machine and hardware environment ($N = 1,000,000$, `int32_t`).
-> <br> **Note:** For **Runtime**, lower is better (`-n%` = faster). For **L1 Hit Rate** and **Branch Hit Rate**, higher is better (`+n%p` = more hits).
+> Compared against `std::sort` on the same machine and workload ($N = 1,000,000$, `int32_t`).  
+> **Note:** **Runtime** = lower is better (`-n%` is faster) · **Hit Rate** = higher is better (`+n%p` is more hits).
 
-| Scenario | Algorithm | Runtime | L1 Hit Rate | Branch Hit Rate | vs. `std::sort` |
-| :--- | :--- | ---: | ---: | ---: | :--- |
-| `1_Frame_Jitter` | `boundary_trimmed_merge` | 13.43 ms | 99.47% | 93.78% | Runtime `-53.7%`, <br> L1 Hit `+1.43%p`,<br>  Br Hit `+10.99%p` |
-| `2_Append_5Pct_Tail` | `boundary_trimmed_merge` | 2.99 ms | 95.48% | 98.22% | Runtime `-84.2%`,<br>  L1 Hit `-2.42%p`,<br>  Br Hit `+4.26%p` |
-| `6_Organ_Pipe` | `boundary_trimmed_merge` | 8.86 ms | 95.20% | 99.71% | Runtime `-43.5%`, <br> L1 Hit `-1.01%p`, <br> Br Hit `+6.73%p` |
-| `0_Uniform_Random` | `boundary_trimmed_merge` | 21.32 ms | 95.11% | 95.02% | Runtime `-60.2%`, <br> L1 Hit `-2.72%p`,<br>  Br Hit `+19.48%p` |
-| `0_Uniform_Random` | `tiled_pingpong_merge` | 20.40 ms | 96.93% | 94.89% | Runtime `-61.9%`, <br> L1 Hit `-0.90%p`, <br> Br Hit `+19.35%p` |
-| `5_Gaussian_Normal` | `tiled_pingpong_merge` | 20.37 ms | 96.93% | 94.88% | Runtime `-54.7%`, <br> L1 Hit `-0.92%p`, <br> Br Hit `+18.99%p` |
+| Scenario | Algorithm | Runtime | L1 Hit Rate  | Branch Hit Rate  |
+| :--- | :--- | ---: | ---: | ---: |
+| `1_Frame_Jitter` | `boundary_trimmed_merge` | **13.43 ms** (`-53.7%`) | **99.47%** (`+1.43%p`) | **93.78%** (`+10.99%p`) |
+| `2_Append_5Pct_Tail` | `boundary_trimmed_merge` | **2.99 ms** (`-84.2%`) | **95.48%** (`-2.42%p`) | **98.22%** (`+4.26%p`) |
+| `6_Organ_Pipe` | `boundary_trimmed_merge` | **8.86 ms** (`-43.5%`) | **95.20%** (`-1.01%p`) | **99.71%** (`+6.73%p`) |
+| `0_Uniform_Random` | `boundary_trimmed_merge` | **21.32 ms** (`-60.2%`) | **95.11%** (`-2.72%p`) | **95.02%** (`+19.48%p`) |
+| `0_Uniform_Random` | `tiled_pingpong_merge` | **20.40 ms** (`-61.9%`) | **96.93%** (`-0.90%p`) | **94.89%** (`+19.35%p`) |
+| `5_Gaussian_Normal` | `tiled_pingpong_merge` | **20.37 ms** (`-54.7%`) | **96.93%** (`-0.92%p`) | **94.88%** (`+18.99%p`) |
+
+> - **`0_Uniform_Random`**: Uniformly distributed random integers with no initial order (high entropy).
+> - **`1_Frame_Jitter`**: Pre-sorted array with small local random noise applied to every element (nearly sorted).
+> - **`2_Append_5Pct_Tail`**: 95% sorted prefix followed by 5% unsorted random elements at the tail.
+> - **`5_Gaussian_Normal`**: Bell-curve normal distribution concentrated around the mean.
+> - **`6_Organ_Pipe`**: Symmetric mountain-shaped array (ascending first half, descending second half).
 
 > [!NOTE]
 > 🚧 This README is a work in progress and will be updated regularly.

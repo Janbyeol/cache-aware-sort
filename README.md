@@ -3,10 +3,13 @@
 **English** | [한국어](README.ko.md)
 
 > **🤖 AI Collaboration Disclosure**
-> 
-> I am an undergraduate student currently learning algorithms and computer architecture. As a beginner who is not yet fluent in writing low-level C++ optimization code, **I actively utilized Generative AI (ChatGPT and Gemini) to implement the C++20 source code, refactor the structure, and build the benchmarking suite.**
-> However, **all the core optimization ideas, algorithmic hypotheses, and the iterative problem-solving flow documented in this repository are entirely my own.**
-
+>
+> **Let me be 100% transparent about what AI did—and what I did:**
+>
+> * **Heavy AI Assistance for Code & Low-Level Tuning:**  
+>   I am an undergraduate student still learning algorithms and computer architecture. Because I am not yet skilled enough to write low-level C++ optimizations on my own, **I heavily relied on Generative AI (ChatGPT and Gemini) to write the C++20 code, apply low-level hardware tricks (e.g., branchless `cmov`, cache-line alignment, L1 tiling), and build the benchmarking/profiling suite.**
+> * **100% Original Ideas & Thought Process (Zero Plagiarism):**  
+>   However, **none of the core sorting ideas or the `Idea 1` $\rightarrow$ `Idea 4` evolution were copied from existing papers, articles, or repositories.** Every algorithmic hypothesis—from splitting down to 64-byte cache lines to trimming merge boundaries with opposite-direction pointers—**was conceived entirely from scratch in my own head** out of pure curiosity.
 ---
 
 ## Feedback & Contributions
@@ -71,6 +74,33 @@ This repository documents the journey of turning these raw ideas into working C+
 > - `2_Append_5Pct_Tail`: 95% sorted prefix followed by 5% unsorted random elements at the tail.
 > - `5_Gaussian_Normal`: Bell-curve normal distribution concentrated around the mean.
 > - `6_Organ_Pipe`: Symmetric mountain-shaped array (ascending first half, descending second half).
+
+## 🧠 Thought Process & Evolution of Ideas
+This project grew out of a series of "what if" experiments (`Idea 1` $\rightarrow$ `Idea 4`). While the core algorithmic concepts came from my own hypotheses, **I actively leaned on AI to translate those ideas into low-level C++ optimizations** (such as branchless `cmov` loops, galloping boundary search, and L1 cache tiling) that I wouldn't have known how to write on my own as an undergraduate.
+
+### Idea 1: 64-Byte Cache-Line Cutoff Quick Sort (`cache_leaf_quick`)
+* **My Idea:** Since a CPU loads memory in **64-byte cache lines** (16 `int32_t` elements), recursively partitioning subarrays smaller than 64 bytes gives no extra cache-hit benefit and only adds recursion overhead. What if we stop Quick Sort right at the 64-byte boundary and finish each micro-block with a simple linear Insertion Sort?
+* **Outcome:** It was slightly faster than basic Quick Sort, but since the overall structure was still top-down Quick Sort, the improvement was pretty modest.
+  
+### Idea 2: Mean-Pivot Prediction via Summation (`mean_pivot_quick`)
+* **My Idea:** During a Quick Sort partition pass, we already scan every element in the subarray. What if we also calculate the `sum`, `min`, and `max` of the left and right partitions during that scan, and use the average (`sum / count`) as the next pivot to better predict the center of the data?
+* **Outcome:** It worked nicely on symmetric distributions and skipped all-duplicate ranges (`min == max`) quickly, but maintaining running sums added overhead and still couldn't solve Quick Sort's heavy branch mispredictions on random data.
+  
+### Idea 3: 64B Micro-Block + Cross-Pointer Boundary-Trimmed Merge (`boundary_trimmed_merge`)
+* **My Idea:** Seeing the limits of top-down Quick Sort, I flipped the approach **bottom-up**—starting from Merge Sort instead:
+  1. Instead of recursively splitting the array down to 1 element like standard Merge Sort, slice the array directly into **64-byte (16-element) blocks** and sort each block with Insertion Sort.
+  2. When merging two adjacent sorted blocks, instead of blindly merging the whole range from start to end, start two pointers at the meeting boundary (`mid`) and walk them outward in opposite directions (`left` $\leftarrow$ `mid` $\rightarrow$ `right`) to **trim away outer elements that are already in order**, merging only the overlapping middle section.
+* **AI-Assisted Low-Level Optimization:** To make this idea actually fast on hardware, AI helped me implement the merge core using **bidirectional branchless conditional moves (`cmov`)** (picking the minimum from the front and maximum from the back simultaneously without branch mispredictions), along with **exponential galloping** for boundary trimming and **half-buffer merging** to minimize memory copies.
+* **Outcome:** Among the ideas I tried, **this was the one that finally showed a genuinely meaningful jump in the benchmarks**, especially on partially ordered or jittered data.
+  
+### Idea 4: 8 KiB L1 Tiling + Ping-Pong Merge (`tiled_pingpong_merge`)
+* **Thought & AI Collaboration:** While `Idea 3` worked great on partially ordered data, completely random data has almost no sorted boundaries to trim—meaning `Idea 3` still had to `memcpy` merged elements from the scratch buffer back to the main array on every pass. Working with AI to bottleneck-test random workloads, we grouped merges into **8 KiB L1-sized tiles** and **ping-ponged (alternated)** the source and destination pointers between the main array and buffer to eliminate redundant `memcpy` passes.
+* **Outcome:** Cutting out those repeated buffer copies helped shave off a bit more time and cache misses on 100% random data.
+
+### 💡 Takeaway from the Idea Evolution
+Looking back at the progression from `Idea 1` $\rightarrow$ `Idea 4`, **`Idea 3` (`boundary_trimmed_merge`)**—along with `Idea 4` as its random-data variant—turned out to be the most meaningful outcome among my attempts.
+Of course, much smarter people out there have already designed far better and faster sorting algorithms than this. Still, seeing this rough idea actually hold its own against `std::sort` in the benchmarks made me think: *"At least `Idea 3` seems decent enough—maybe it could actually be somewhat useful in the right situation?"*
+
 
 > [!NOTE]
 > 🚧 This README is a work in progress and will be updated regularly.

@@ -46,6 +46,7 @@ This repository documents the journey of turning these raw ideas into working C+
 ## Key Hardware Performance Highlights (`perf_event_open`)
 
 > All relative percentages (`+n%`, `-n%`) below are compared against `std::sort` executed on the exact same machine and hardware environment ($N = 1,000,000$, `int32_t`).
+> <br> **Note:** For **Runtime**, lower is better (`-n%` = faster). For **L1 Hit Rate** and **Branch Hit Rate**, higher is better (`+n%p` = more hits).
 
 | Scenario | Algorithm | Runtime | L1 Hit Rate | Branch Hit Rate | vs. `std::sort` |
 | :--- | :--- | ---: | ---: | ---: | :--- |

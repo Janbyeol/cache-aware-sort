@@ -43,6 +43,18 @@ After learning that Quick Sort's practical speed comes from **Cache Locality**â€
 
 This repository documents the journey of turning these raw ideas into working C++20 code and benchmarking them against `std::sort` and `std::stable_sort`.
 
+## Key Hardware Performance Highlights (`perf_event_open`)
+
+> All relative percentages (`+n%`, `-n%`) below are compared against `std::sort` executed on the exact same machine and hardware environment ($N = 1,000,000$, `int32_t`).
+
+| Scenario | Algorithm | Runtime | L1 Hit Rate | Branch Hit Rate | vs. `std::sort` |
+| :--- | :--- | ---: | ---: | ---: | :--- |
+| `1_Frame_Jitter` | `boundary_trimmed_merge` | 13.43 ms | 99.47% | 93.78% | Runtime `-53.7%`, <br> L1 Hit `+1.43%p`,<br>  Br Hit `+10.99%p` |
+| `2_Append_5Pct_Tail` | `boundary_trimmed_merge` | 2.99 ms | 95.48% | 98.22% | Runtime `-84.2%`,<br>  L1 Hit `-2.42%p`,<br>  Br Hit `+4.26%p` |
+| `6_Organ_Pipe` | `boundary_trimmed_merge` | 8.86 ms | 95.20% | 99.71% | Runtime `-43.5%`, <br> L1 Hit `-1.01%p`, <br> Br Hit `+6.73%p` |
+| `0_Uniform_Random` | `boundary_trimmed_merge` | 21.32 ms | 95.11% | 95.02% | Runtime `-60.2%`, <br> L1 Hit `-2.72%p`,<br>  Br Hit `+19.48%p` |
+| `0_Uniform_Random` | `tiled_pingpong_merge` | 20.40 ms | 96.93% | 94.89% | Runtime `-61.9%`, <br> L1 Hit `-0.90%p`, <br> Br Hit `+19.35%p` |
+| `5_Gaussian_Normal` | `tiled_pingpong_merge` | 20.37 ms | 96.93% | 94.88% | Runtime `-54.7%`, <br> L1 Hit `-0.92%p`, <br> Br Hit `+18.99%p` |
 
 > [!NOTE]
 > ðŸš§ This README is a work in progress and will be updated regularly.

@@ -1,9 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "SELF_PATH=%~f0"
 
 echo [1/2] Generating Visual Studio Solution and Projects...
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$s = [System.IO.File]::ReadAllText('%~f0'); $idx = $s.LastIndexOf('###_PS_START_###'); Invoke-Expression $s.Substring($idx + 16)"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$s = [System.IO.File]::ReadAllText($env:SELF_PATH); $idx = $s.LastIndexOf('###_PS_START_###'); Invoke-Expression $s.Substring($idx + 16)"
 if errorlevel 1 (
     echo [ERROR] Failed to generate solution files.
     exit /b 1
@@ -19,12 +20,17 @@ if (!(Test-Path $vsDir)) {
     New-Item -ItemType Directory -Path $vsDir | Out-Null
 }
 
+$pf64 = $env:ProgramFiles
+$pf86 = ${env:ProgramFiles(x86)}
+$vsRoot64 = if ($pf64) { Join-Path $pf64 "Microsoft Visual Studio" } else { "" }
+$vsRoot86 = if ($pf86) { Join-Path $pf86 "Microsoft Visual Studio" } else { "" }
+
 $toolset = "v143"
-if (Test-Path "C:\Program Files\Microsoft Visual Studio\18") {
+if ($vsRoot64 -and (Test-Path (Join-Path $vsRoot64 "18"))) {
     $toolset = "v145"
-} elseif (Test-Path "C:\Program Files\Microsoft Visual Studio\2022") {
+} elseif ($vsRoot64 -and (Test-Path (Join-Path $vsRoot64 "2022"))) {
     $toolset = "v143"
-} elseif (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019") {
+} elseif ($vsRoot86 -and (Test-Path (Join-Path $vsRoot86 "2019"))) {
     $toolset = "v142"
 }
 Write-Host ("      -> Detected PlatformToolset: " + $toolset)

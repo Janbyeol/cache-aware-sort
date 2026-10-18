@@ -9,7 +9,8 @@
 | 파일 경로 | 역할 |
 | :--- | :--- |
 | **`utility/linux/pure_perf_bench.cpp`** | **(권장) 커널 `perf_event_open` 직접 제어 벤치마크** — 데이터 생성(`generate_game_workload`) 및 메모리 복사(`memcpy`) 구간을 100% 배제하고 **순수 정렬 함수 실행 구간의 하드웨어 카운터만 정밀 측정** |
-| **`utility/linux/run_pure_perf.sh`** | **(권장)** `pure_perf_4b` / `pure_perf_8b` 자동 빌드 및 실행 후 `pure_cache_results.csv` + `pure_cache_results.md` 생성 |
+| **`utility/linux/run_pure_perf.sh`** | **(권장)** `pure_perf_4b` / `pure_perf_8b` 자동 빌드 및 단일 $N$ 또는 전체 $N$ 일괄 측정(`--all`) 실행 |
+| **`utility/linux/run_pure_perf_all.sh`** | **(권장) 10개 $N$ 스케일 일괄 측정 + 쿨링 대기** (`16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000`) |
 | `utility/linux/profile_one.cpp` | 외부 `perf stat` 명령어와 함께 쓰는 단일 알고리즘 실행기 |
 | `utility/linux/run_perf_csv.sh` | 외부 `perf stat` 래퍼 스크립트 |
 | `utility/linux/LINUX_PERF_GUIDE.md` | 리눅스 프로파일링 명령어 사용 설명서 |
@@ -35,6 +36,24 @@ sudo sysctl -w kernel.kptr_restrict=0
 ## 3. [권장] 데이터 생성 노이즈 0% 순수 정렬 측정 (`utility/linux/run_pure_perf.sh`)
 
 리눅스 커널 시스템 콜(`perf_event_open` + `ioctl(PERF_EVENT_IOC_ENABLE / DISABLE)`)을 C++ 코드 내부에서 직접 제어하여, **데이터 생성(`generate_game_workload`)과 버퍼 복사(`memcpy`) 동안에는 하드웨어 카운터를 완전히 꺼두고 오직 정렬 함수가 도는 순간만 100% 순수 측정**합니다.
+
+### 3.1 전체 10개 $N$ 스케일 한번에 일괄 측정 + CPU 쿨링 대기 (`--all`)
+
+$N \in \{16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000\}$ 전체를 순차 측정하며, **$N$이 바뀔 때마다 CPU 열/부스트 클럭 안정화를 위한 쿨링 대기 시간(기본 5초)**을 두어 공정하게 측정합니다. 결과는 `docs/pure_cache_results_N=<N>.csv` (개별 파일) 및 `docs/pure_cache_results_all.csv` (통합 파일)로 자동 저장됩니다.
+
+- **문법:** `./utility/linux/run_pure_perf.sh --all [반복횟수(기본:3)] [쿨링시간_초(기본:5)] [저장폴더(기본:docs)]` (또는 `./utility/linux/run_pure_perf_all.sh`)
+
+```bash
+# 기본 일괄 실행 (10개 N 전체, 각 3회 평균, N 전환 시 5초 쿨링 -> docs/ 폴더에 저장)
+./utility/linux/run_pure_perf.sh --all
+# 또는
+./utility/linux/run_pure_perf_all.sh
+
+# 반복 횟수(5회)와 N 전환 쿨링 시간(10초)을 직접 지정하여 실행
+./utility/linux/run_pure_perf.sh --all 5 10 docs
+```
+
+### 3.2 단일 $N$ 지정 측정 (기존 명령어)
 
 - **문법:** `./utility/linux/run_pure_perf.sh [원소개수_N] [반복횟수] [저장할_CSV파일명]`
 

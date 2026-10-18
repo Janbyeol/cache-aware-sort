@@ -44,8 +44,14 @@ $RECYCLE.BIN/
 *.lnk
 
 ### Benchmark & Build Outputs
+*.csv
+*.png
+!docs/
+!docs/*.csv
+!docs/*.png
 *.log
 *_results.md
+docs/*.md
 test_4b
 test_8b
 bench_4b

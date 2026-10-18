@@ -6,10 +6,10 @@ namespace {
 
 // Find the first index in sorted [begin, mid) where data[idx] > right_min.
 // Starts at `mid` and walks left (<-):
-//   1. Fast linear scan for up to 8 elements (residing in the same 64B cache line as `mid`).
+//   1. Linear scan for up to 8 elements near the boundary (not necessarily one cache line).
 //   2. O(1) outer-boundary check (`data[begin] > right_min`) to skip full-block scans on random data.
 //   3. Exponential galloping (step = 8, 16, 32...) + binary search to locate the exact boundary
-//      in O(log K) without polluting L1 cache lines.
+//      with O(log K) probes after the initial linear scan.
 HSORT_ALWAYS_INLINE std::size_t trim_left_boundary(const Item* __restrict data,
                                                    std::size_t begin,
                                                    std::size_t mid,
@@ -55,7 +55,7 @@ HSORT_ALWAYS_INLINE std::size_t trim_left_boundary(const Item* __restrict data,
 
 // Find the first index in sorted [mid, end) where !(data[idx] < left_max).
 // Starts at `mid` and walks right (->):
-//   1. Fast linear scan for up to 8 elements (same 64B cache line as `mid`).
+//   1. Linear scan for up to 8 elements near the boundary.
 //   2. O(1) outer-boundary check (`data[end - 1] < left_max`).
 //   3. Exponential galloping + binary search in O(log K).
 HSORT_ALWAYS_INLINE std::size_t trim_right_boundary(const Item* __restrict data,
@@ -102,7 +102,7 @@ HSORT_ALWAYS_INLINE std::size_t trim_right_boundary(const Item* __restrict data,
 }
 
 // Bidirectional branchless merge writing into `dst[0 .. end - begin)` (anchored at offset 0 of scratch buffer)
-// so small and medium merges always hit hot L1/L2 cache lines at the start of `buffer`.
+// to reuse its prefix for small and medium merges and limit the active scratch working set.
 HSORT_ALWAYS_INLINE void bidirectional_merge_to_scratch(const Item* __restrict src,
                                                         Item* __restrict scratch,
                                                         std::size_t begin,
@@ -212,7 +212,7 @@ HSORT_ALWAYS_INLINE void trimmed_merge_pair(Item* __restrict data,
     const std::size_t total_len = right_ptr - left_ptr;
 
     // When the overlap is tiny or asymmetric (e.g., Append 5% Tail), copy only the smaller half
-    // into `scratch[0]` and merge directly into `data` (cuts memory writes in half and avoids full memcpy back).
+    // into `scratch[0]` and merge directly into `data`, avoiding a full-range copy back.
     if (left_len <= right_len) {
         if (left_len <= 8 || (left_len * 4 <= right_len)) {
             half_buffer_merge_left_smaller(data, scratch, left_ptr, mid, right_ptr);
@@ -243,12 +243,12 @@ HSORT_ALWAYS_INLINE void trimmed_merge_pair(Item* __restrict data,
 //      within each 8KiB L1 window while the cache lines are hot in L1D.
 //   2. Hybrid Galloping Cross-Pointer Trimming:
 //      Starts at `mid` and walks outward in opposite directions (left <- mid -> right):
-//      scans up to 8 items linearly (inside `mid`'s cache line), then uses O(1) outer-bound
+//      scans up to 8 items linearly near the boundary, then uses O(1) outer-bound
 //      checks and exponential galloping to avoid scanning thousands of cache lines on random data.
 //   3. Anchored Scratch (`scratch[0]`) + Half-Buffer In-Place Merge:
 //      Small/asymmetric overlaps copy ONLY `min(left_len, right_len)` to `scratch[0]` and
 //      merge directly into `data` (eliminating the post-merge memcpy). Balanced overlaps
-//      merge into `scratch[0 .. len)` so the scratch buffer stays pinned in L1/L2 cache.
+//      reuse `scratch[0 .. len)`; large overlaps may exceed L1/L2 capacity.
 // ============================================================================
 void boundary_trimmed_merge_sort(Item* data, std::size_t n) {
     if (n <= LEAF_SIZE) {

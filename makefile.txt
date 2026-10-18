@@ -9,21 +9,23 @@ COMMON_SRCS := \
 	src/idea4_tiled_pingpong_merge.cpp \
 	src/benchmark_api.cpp
 
+COMMON_HEADERS := $(wildcard include/*.hpp)
+
 all: test_4b test_8b bench_4b bench_8b
 
 # 1. Unit Test Targets (4-byte key vs. 8-byte key+id record)
-test_4b: $(COMMON_SRCS) src/test_main.cpp
-	$(CXX) $(CXXFLAGS) $^ -o $@
+test_4b: $(COMMON_SRCS) src/test_main.cpp $(COMMON_HEADERS)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@
 
-test_8b: $(COMMON_SRCS) src/test_main.cpp
-	$(CXX) $(CXXFLAGS) -DBENCH_RECORD=1 $^ -o $@
+test_8b: $(COMMON_SRCS) src/test_main.cpp $(COMMON_HEADERS)
+	$(CXX) $(CXXFLAGS) -DBENCH_RECORD=1 $(filter %.cpp,$^) -o $@
 
 # 2. Benchmark Targets (4-byte key vs. 8-byte key+id record)
-bench_4b: $(COMMON_SRCS) src/benchmark_main.cpp
-	$(CXX) $(CXXFLAGS) $^ -o $@
+bench_4b: $(COMMON_SRCS) src/benchmark_main.cpp $(COMMON_HEADERS)
+	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@
 
-bench_8b: $(COMMON_SRCS) src/benchmark_main.cpp
-	$(CXX) $(CXXFLAGS) -DBENCH_RECORD=1 $^ -o $@
+bench_8b: $(COMMON_SRCS) src/benchmark_main.cpp $(COMMON_HEADERS)
+	$(CXX) $(CXXFLAGS) -DBENCH_RECORD=1 $(filter %.cpp,$^) -o $@
 
 # Runner Targets
 test: test_4b test_8b

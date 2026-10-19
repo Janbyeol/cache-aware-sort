@@ -13,13 +13,13 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  2) 전체 N 일괄 측정 + 쿨링 대기 (--all 모드):"
     echo "     $0 --all [반복횟수] [쿨링시간_초] [저장할_폴더경로]"
     echo "     대상 N: 16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000"
-    echo "     기본값: 반복횟수=3, 쿨링시간=5초, 저장폴더=docs"
+    echo "     기본값: 반복횟수=3, 쿨링시간=5초, 저장폴더=docs/linux"
     echo ""
     echo "예시:"
     echo "  $0                                   # 기본 실행 (N=1,000,000 -> pure_cache_results.csv, .md)"
     echo "  $0 131072 5 pure_l2_131k.csv         # 단일 크기(131,072개) 5회 평균"
-    echo "  $0 --all                             # 10개 N 전체 일괄 측정 (N 전환 시 5초 쿨링 -> docs/ 저장)"
-    echo "  $0 --all 5 10 docs                   # 10개 N 전체 5회 반복, N 전환 시 10초 쿨링 -> docs/ 저장"
+    echo "  $0 --all                             # 10개 N 전체 일괄 측정 (N 전환 시 5초 쿨링 -> docs/linux/ 저장)"
+    echo "  $0 --all 5 10 docs/linux             # 10개 N 전체 5회 반복, N 전환 시 10초 쿨링 -> docs/linux/ 저장"
     exit 0
 fi
 
@@ -52,7 +52,7 @@ if [[ "$1" == "--all" || "$1" == "all" ]]; then
     N_LIST=(16 64 256 1024 2048 8192 32768 262144 1000000 5000000)
     REPEATS=${2:-3}
     COOLING_SEC=${3:-5}
-    OUT_DIR=${4:-"$ROOT_DIR/docs"}
+    OUT_DIR=${4:-"$ROOT_DIR/docs/linux"}
 
     mkdir -p "$OUT_DIR"
     ALL_CSV="$OUT_DIR/pure_cache_results_all.csv"

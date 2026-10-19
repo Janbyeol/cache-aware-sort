@@ -47,11 +47,12 @@ $RECYCLE.BIN/
 *.csv
 *.png
 !docs/
-!docs/*.csv
-!docs/*.png
+!docs/**/
+!docs/**/*.csv
+!docs/**/*.png
 *.log
 *_results.md
-docs/*.md
+docs/**/*.md
 test_4b
 test_8b
 bench_4b

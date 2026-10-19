@@ -39,18 +39,18 @@ sudo sysctl -w kernel.kptr_restrict=0
 
 ### 3.1 전체 10개 $N$ 스케일 한번에 일괄 측정 + CPU 쿨링 대기 (`--all`)
 
-$N \in \{16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000\}$ 전체를 순차 측정하며, **$N$이 바뀔 때마다 CPU 열/부스트 클럭 안정화를 위한 쿨링 대기 시간(기본 5초)**을 두어 공정하게 측정합니다. 결과는 `docs/pure_cache_results_N=<N>.csv` (개별 파일) 및 `docs/pure_cache_results_all.csv` (통합 파일)로 자동 저장됩니다.
+$N \in \{16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000\}$ 전체를 순차 측정하며, **$N$이 바뀔 때마다 CPU 열/부스트 클럭 안정화를 위한 쿨링 대기 시간(기본 5초)**을 두어 공정하게 측정합니다. 결과는 `docs/linux/pure_cache_results_N=<N>.csv` (개별 파일) 및 `docs/linux/pure_cache_results_all.csv` (통합 파일)로 자동 저장됩니다.
 
-- **문법:** `./utility/linux/run_pure_perf.sh --all [반복횟수(기본:3)] [쿨링시간_초(기본:5)] [저장폴더(기본:docs)]` (또는 `./utility/linux/run_pure_perf_all.sh`)
+- **문법:** `./utility/linux/run_pure_perf.sh --all [반복횟수(기본:3)] [쿨링시간_초(기본:5)] [저장폴더(기본:docs/linux)]` (또는 `./utility/linux/run_pure_perf_all.sh`)
 
 ```bash
-# 기본 일괄 실행 (10개 N 전체, 각 3회 평균, N 전환 시 5초 쿨링 -> docs/ 폴더에 저장)
+# 기본 일괄 실행 (10개 N 전체, 각 3회 평균, N 전환 시 5초 쿨링 -> docs/linux/ 폴더에 저장)
 ./utility/linux/run_pure_perf.sh --all
 # 또는
 ./utility/linux/run_pure_perf_all.sh
 
 # 반복 횟수(5회)와 N 전환 쿨링 시간(10초)을 직접 지정하여 실행
-./utility/linux/run_pure_perf.sh --all 5 10 docs
+./utility/linux/run_pure_perf.sh --all 5 10 docs/linux
 ```
 
 ### 3.2 단일 $N$ 지정 측정 (기존 명령어)

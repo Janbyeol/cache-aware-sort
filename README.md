@@ -2,7 +2,7 @@
 
 **English** | [한국어](README.ko.md)
 
-A C++20 experiment in small-block sorting, boundary trimming, and tiled merging. The project compares four custom sorting variants with `std::sort`, `std::stable_sort`, and a basic Quicksort on synthetic, game-inspired workloads.
+A C++20 experiment in small-block sorting, boundary trimming, and tiled merging. The initial study compares four custom sorting variants (Ideas 1–4) with `std::sort`, `std::stable_sort`, and a basic Quicksort on synthetic, game-inspired workloads, with subsequent follow-up experiments (Idea 5+) explored separately.
 
 The focus is on **4-byte integer keys** and **8-byte key + entity ID records**. This is a learning project with workload-dependent results, not a general-purpose replacement for the standard library.
 
@@ -15,6 +15,7 @@ The focus is on **4-byte integer keys** and **8-byte key + entity ID records**. 
 - [Motivation](#motivation)
 - [Build and run](#build-and-run)
 - [How the four ideas evolved](#how-the-four-ideas-evolved)
+- [Follow-up ideas (Idea 5+)](#follow-up-ideas-idea-5)
 - [Workloads](#workloads)
 - [Recorded results](#recorded-results)
 - [Benchmark methodology and reproduction](#benchmark-methodology-and-reproduction)
@@ -53,9 +54,9 @@ make -f makefile.txt all
 make -f makefile.txt bench
 ```
 
-The filename is **`makefile.txt`**, so the `-f` option is required. The default flags are `-O3 -march=native -std=c++20 -Wall -Wextra -Iinclude`; binaries built with `-march=native` may not run on a different CPU.
+Use `-f makefile.txt`. The default build flags are `-O3 -std=c++20 -Wall -Wextra -Iinclude`.
 
-- `test_4b` / `test_8b`: correctness checks. The current suite performs **3,372 checks per format**, covering boundary sizes, all seven workloads, randomized cases, record integrity, allocation overflow, and additional boundary-trimmed merge regressions.
+- `test_4b` / `test_8b`: correctness checks. The suite covers boundary sizes, all seven workloads, randomized cases, record integrity, allocation overflow, and additional boundary-trimmed merge regressions.
 - `bench_4b` / `bench_8b`: fixed-size wall-clock benchmark runners. They write `key_only_4b_summary.csv` and `key_id_8b_summary.csv` in the working directory.
 - `make -f makefile.txt bench` runs the complete suite, not a single-size benchmark. Use the platform profiling scripts below to choose `N`.
 
@@ -74,11 +75,11 @@ Open the generated `cache-aware-sort.sln`, select **Release | x64**, and build. 
 .\bin\Release\test_8b.exe
 ```
 
-The generated Release projects enable AVX2, so they require a compatible x64 target. The solution generator is **not** the native ARM64 build path. For Windows ARM64 profiling, use the separate scripts described below.
+The solution builds x64 executables with an SSE2 baseline. Use the separate Windows ARM64 profiling scripts below for native ARM64 builds.
 
 ## How the four ideas evolved
 
-The implementations share the item types and low-level helpers in [`include/hybrid_sorts.hpp`](include/hybrid_sorts.hpp).
+The initial implementation explored four ideas sharing the item types and low-level helpers in [`include/hybrid_sorts.hpp`](include/hybrid_sorts.hpp).
 
 ### Idea 1: Cache-line-sized Quicksort leaves
 
@@ -111,6 +112,18 @@ This is the most useful direction in the recorded append-tail and jittered workl
 It also probes global ordering trends, adjusts mostly descending input, and confirms sortedness before taking an early return. The probe alone is not treated as proof that the array is sorted.
 
 Both merge variants use conditional selection in their merge kernels. AI helped implement these kernels, boundary searches, and tiling. Whether the compiler emits `cmov`, conditional-select instructions, or branches depends on the target and compiler; the algorithms are not entirely branch-free.
+
+## Follow-up ideas (Idea 5+)
+
+The initial implementation and the archived Linux hardware-counter study below concluded with Ideas 1–4. The ideas in this section were added later as follow-up experiments sparked by questions that came up after finishing Idea 4.
+
+### Idea 5: SIMD tiled ping-pong merge
+
+After finishing Idea 4, a natural follow-up question came up: since each 64-byte leaf holds a fixed number of elements (16× 4B keys or 8× 8B records), what happens if we vectorize the 64-byte leaf sort and the overlapping merge step using SIMD bitonic sorting networks?
+
+[`simd_tiled_pingpong_merge_sort`](src/idea5_simd_tiled_merge.cpp) reuses Idea 4's 8 KiB tiles, binary boundary trimming, and ping-pong buffer swaps, while replacing full 64-byte leaves and complete vector overlaps with a bitonic network ([`src/simd/network.hpp`](src/simd/network.hpp)). For 8-byte records, comparisons use the signed 32-bit key and move the 32-bit entity ID alongside it. Equal keys can change order.
+
+Set `HSORT_SIMD_ISA` before launch to `auto` (default), `scalar`, `sse2`, `avx2`, `avx512f`, or `neon`. Auto currently chooses AVX2 or SSE2 on x64, NEON on supported ARM64 builds, and scalar elsewhere. Select `avx512f` to use the shared 512-bit kernel on AVX-512F and compatible AVX10.2 CPUs. `HSORT_SIMD_STAGE` accepts `leaf`, `merge`, and `both` (default) so the leaf and merge vectorization stages can be isolated independently. The profiler label records the selected kernel, active stages, and detected CPU capability. See the [Windows x64 AVX2 follow-up benchmark](docs/windows-x64/2026-11-19-avx2/README.md) for full comparisons across all eight sorts and stage-by-stage isolation of SIMD leaf vs. SIMD merge.
 
 ## Workloads
 
@@ -166,7 +179,7 @@ The ten committed CSVs cover both formats at `N = 16, 64, 256, 1024, 2048, 8192,
 
 ### Wall-clock suite
 
-`make -f makefile.txt bench` runs seven algorithms, seven scenarios, and five sizes (`128, 2048, 8192, 131072, 1000000`). It reports the median of five per-array timing samples, batching smaller arrays to reduce timer overhead. Input generation, the input copy, and result verification are outside the timed interval; work performed inside the sort, including scratch allocation and internal copies, remains included.
+`make -f makefile.txt bench` runs eight algorithms, seven scenarios, and five sizes (`128, 2048, 8192, 131072, 1000000`). It reports the median of five per-array timing samples, batching smaller arrays to reduce timer overhead. Input generation, the input copy, and result verification are outside the timed interval; work performed inside the sort, including scratch allocation and internal copies, remains included.
 
 This runner verifies sorted keys after each timed sample and checks record IDs/payloads in 8-byte mode. Its `trimmed_merge` output label refers to `boundary_trimmed_merge_sort`.
 
@@ -224,7 +237,7 @@ My takeaway is that boundary trimming is worth exploring when much of the input 
 | --- | --- |
 | [`include/hybrid_sorts.hpp`](include/hybrid_sorts.hpp) | Item types, constants, aligned buffer, shared kernels, and public declarations |
 | [`src/baseline_sorts.cpp`](src/baseline_sorts.cpp) | Basic Quicksort and standard-library baselines |
-| [`src/`](src/) | Four custom implementations, workload generator, correctness tests, and timing runner |
+| [`src/`](src/) | Initial four custom implementations (Ideas 1–4), follow-up SIMD implementations (Idea 5+), workload generator, correctness tests, and timing runner |
 | [`makefile.txt`](makefile.txt) | GCC test and benchmark targets |
 | [`generate_solution.bat`](generate_solution.bat) | Visual Studio x64 solution generator |
 | [`utility/linux/`](utility/linux/) | Linux PMU profiler and external `perf stat` wrapper |

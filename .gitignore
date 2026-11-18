@@ -53,6 +53,7 @@ $RECYCLE.BIN/
 *.log
 *_results.md
 docs/**/*.md
+!docs/windows-x64/**/README.md
 test_4b
 test_8b
 bench_4b

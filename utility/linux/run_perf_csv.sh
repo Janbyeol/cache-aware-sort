@@ -23,26 +23,12 @@ MD_FILE="${CSV_FILE%.csv}.md"
 PROF_4B="$SCRIPT_DIR/prof_4b"
 PROF_8B="$SCRIPT_DIR/prof_8b"
 
-if [[ ! -f "$PROF_4B" || ! -f "$PROF_8B" ]]; then
-    echo "[Build] prof_4b 및 prof_8b 컴파일 중..."
-    g++ -O3 -march=native -std=c++20 -I"$ROOT_DIR/include" \
-        "$ROOT_DIR/src/baseline_sorts.cpp" \
-        "$ROOT_DIR/src/idea1_cache_leaf_quick.cpp" \
-        "$ROOT_DIR/src/idea2_mean_pivot_quick.cpp" \
-        "$ROOT_DIR/src/idea3_boundary_trimmed_merge.cpp" \
-        "$ROOT_DIR/src/idea4_tiled_pingpong_merge.cpp" \
-        "$ROOT_DIR/src/benchmark_api.cpp" \
-        "$SCRIPT_DIR/profile_one.cpp" -o "$PROF_4B"
-
-    g++ -O3 -march=native -std=c++20 -I"$ROOT_DIR/include" -DBENCH_RECORD=1 \
-        "$ROOT_DIR/src/baseline_sorts.cpp" \
-        "$ROOT_DIR/src/idea1_cache_leaf_quick.cpp" \
-        "$ROOT_DIR/src/idea2_mean_pivot_quick.cpp" \
-        "$ROOT_DIR/src/idea3_boundary_trimmed_merge.cpp" \
-        "$ROOT_DIR/src/idea4_tiled_pingpong_merge.cpp" \
-        "$ROOT_DIR/src/benchmark_api.cpp" \
-        "$SCRIPT_DIR/profile_one.cpp" -o "$PROF_8B"
-fi
+echo "[Build] prof_4b 및 prof_8b 컴파일 중..."
+sources=("$ROOT_DIR"/src/idea*.cpp "$ROOT_DIR"/src/simd/*.cpp
+         "$ROOT_DIR/src/baseline_sorts.cpp" "$ROOT_DIR/src/benchmark_api.cpp"
+         "$SCRIPT_DIR/profile_one.cpp")
+g++ -O3 -std=c++20 -I"$ROOT_DIR/include" "${sources[@]}" -o "$PROF_4B"
+g++ -O3 -std=c++20 -I"$ROOT_DIR/include" -DBENCH_RECORD=1 "${sources[@]}" -o "$PROF_8B"
 
 # 1) CSV 헤더 초기화
 echo "Data_Type,Scenario,N,Algorithm,L1_Hit_Rate(%),L1_Miss_Rate(%),LLC_Hit_Rate(%),LLC_Miss_Rate(%),Branch_Hit_Rate(%),Branch_Miss_Rate(%),IPC,L1_Loads,L1_Misses,LLC_Refs,LLC_Misses,Branches,Branch_Misses,Cycles,Instructions" > "$CSV_FILE"
@@ -72,6 +58,7 @@ ALGOS=(
     "mean_pivot_quick"
     "boundary_trimmed_merge"
     "tiled_pingpong_merge"
+    "simd_tiled_pingpong_merge"
 )
 EVENTS="cycles,instructions,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,branches,branch-misses"
 
@@ -82,6 +69,7 @@ echo "--------------------------------------------------------------------------
 for TYPE_INFO in "4B_Int32:$PROF_4B" "8B_Record:$PROF_8B"; do
     DTYPE="${TYPE_INFO%%:*}"
     BIN="${TYPE_INFO##*:}"
+    SIMD_LABEL=$("$BIN" --simd-label)
 
     for SCEN_ID in 0 1 2 3 4 5 6; do
         SNAME="${SCEN_NAMES[$SCEN_ID]}"
@@ -89,7 +77,9 @@ for TYPE_INFO in "4B_Int32:$PROF_4B" "8B_Record:$PROF_8B"; do
         for ALGO in "${ALGOS[@]}"; do
             PERF_OUT=$(LC_ALL=C perf stat -x, -r "$REPEATS" -e "$EVENTS" "$BIN" "$ALGO" "$SCEN_ID" "$N" 2>&1)
 
-            ROW=$(echo "$PERF_OUT" | awk -F',' -v dtype="$DTYPE" -v sname="$SNAME" -v n="$N" -v algo="$ALGO" '
+            LABEL=$ALGO
+            if [[ $ALGO == simd_tiled_pingpong_merge ]]; then LABEL=$SIMD_LABEL; fi
+            ROW=$(echo "$PERF_OUT" | awk -F',' -v dtype="$DTYPE" -v sname="$SNAME" -v n="$N" -v algo="$LABEL" '
                 $3 ~ /^cycles/                { cycles = $1 + 0 }
                 $3 ~ /^instructions/          { instr = $1 + 0 }
                 $3 ~ /^cache-references/      { llc_ref = $1 + 0 }

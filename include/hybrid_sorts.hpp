@@ -230,6 +230,12 @@ void boundary_trimmed_merge_sort(Item* data, std::size_t n);
 // [Idea 4] Global Trend Probe + 8KiB L1 Tiling + Ping-Pong Merge Sort (src/idea4_tiled_pingpong_merge.cpp)
 void tiled_pingpong_merge_sort(Item* data, std::size_t n);
 
+// [Idea 5] Tiled ping-pong merge with SIMD sorting networks for complete leaves and overlaps.
+void simd_tiled_pingpong_merge_sort(Item* data, std::size_t n);
+
+// Experiment label including the selected kernel and enabled stages.
+const char* simd_sort_label();
+
 // ============================================================================
 // 6. Benchmark & Verification API (src/benchmark_api.cpp)
 // ============================================================================

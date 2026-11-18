@@ -97,7 +97,6 @@ function Write-Vcxproj([string]$name, [string]$guid, [string]$mainCpp, [bool]$de
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <Optimization>MaxSpeed</Optimization>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <PreprocessorDefinitions>${extraDef}NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -120,6 +119,10 @@ function Write-Vcxproj([string]$name, [string]$guid, [string]$mainCpp, [bool]$de
     <ClCompile Include="..\src\idea2_mean_pivot_quick.cpp" />
     <ClCompile Include="..\src\idea3_boundary_trimmed_merge.cpp" />
     <ClCompile Include="..\src\idea4_tiled_pingpong_merge.cpp" />
+    <ClCompile Include="..\src\idea5_simd_tiled_merge.cpp" />
+    <ClCompile Include="..\src\simd\*.cpp">
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
     <ClCompile Include="..\src\benchmark_api.cpp" />
     <ClCompile Include="..\src\$mainCpp" />
   </ItemGroup>

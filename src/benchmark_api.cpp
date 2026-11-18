@@ -22,7 +22,8 @@ const std::vector<MethodInfo>& get_all_sort_methods() {
         {"cache_leaf_quick",     cache_leaf_quick_sort},
         {"mean_pivot_quick",     mean_pivot_quick_sort},
         {"trimmed_merge",        boundary_trimmed_merge_sort},
-        {"tiled_pingpong_merge", tiled_pingpong_merge_sort}
+        {"tiled_pingpong_merge", tiled_pingpong_merge_sort},
+        {simd_sort_label(),      simd_tiled_pingpong_merge_sort}
     };
     return methods;
 }
@@ -214,6 +215,7 @@ void run_benchmark_suite() {
                   << std::setw(13) << "Idea2(Mean)"
                   << std::setw(14) << "Idea3(Trim)"
                   << std::setw(14) << "Idea4(Tiled)"
+                  << std::setw(14) << "Idea5(SIMD)"
                   << std::setw(13) << "Best vs std" << "\n"
                   << std::string(101, '-') << "\n";
 
@@ -263,7 +265,7 @@ void run_benchmark_suite() {
                     << (std_sort_us / medians[m]) << '\n';
             }
 
-            const double best_custom_us = std::min({medians[3], medians[4], medians[5], medians[6]});
+            const double best_custom_us = *std::min_element(medians.begin() + 3, medians.end());
             std::cout << std::left << std::setw(9) << n
                       << std::right << std::fixed << std::setprecision(2)
                       << std::setw(12) << std_sort_us
@@ -272,6 +274,7 @@ void run_benchmark_suite() {
                       << std::setw(13) << medians[4]
                       << std::setw(14) << medians[5]
                       << std::setw(14) << medians[6]
+                      << std::setw(14) << medians[7]
                       << std::setw(12) << (std_sort_us / best_custom_us) << "x\n";
         }
     }

@@ -1,0 +1,63 @@
+diff --git a/src/benchmark_api.cpp b/src/benchmark_api.cpp
+index 4c6d6cd..71c95db 100644
+--- a/src/benchmark_api.cpp
++++ b/src/benchmark_api.cpp
+@@ -182,8 +182,8 @@ void verify_sorted_batch(const Item* work, std::size_t n, std::size_t batch,
+ void run_benchmark_suite() {
+     using Clock = std::chrono::steady_clock;
+     const auto& methods = get_all_sort_methods();
+-    constexpr std::array<std::size_t, 5> BENCH_SIZES = {
+-        128, 2048, 8192, 131072, 1000000
++    constexpr std::array<std::size_t, 12> BENCH_SIZES = {
++        16, 64, 128, 256, 1024, 2048, 8192, 32768, 131072, 262144, 1000000, 5000000
+     };
+ 
+     std::cout << "====================================================================================================\n"
+@@ -194,14 +194,21 @@ void run_benchmark_suite() {
+     std::ofstream csv(std::string(FORMAT_NAME) + "_summary.csv");
+     csv << "scenario,n,method,median_us,speedup_vs_std_sort\n";
+ 
++    std::ofstream samples(std::string(FORMAT_NAME) + "_samples.csv");
++    samples.exceptions(std::ios::badbit | std::ios::failbit);
++    samples << "format,scenario,n,method,repeat,seed,order,batch,us_per_array\n" << std::setprecision(12);
+     // Warm up instruction and data caches before timing
+     {
+         AlignedBuffer warm(8192);
+         generate_game_workload(warm.data(), 8192, 1, Scenario::Fresh3DDistances, 42);
+-        for (const auto& m : methods) m.fn(warm.data(), 8192);
++        AlignedBuffer warm_work(8192);
++        for (const auto& m : methods) {
++            std::copy_n(warm.data(), 8192, warm_work.data());
++            m.fn(warm_work.data(), 8192);
++        }
+     }
+ 
+-    constexpr int REPEATS = 5;
++    constexpr int REPEATS = 7;
+ 
+     for (int s = 0; s < static_cast<int>(Scenario::Count); ++s) {
+         const Scenario scenario = static_cast<Scenario>(s);
+@@ -229,7 +236,8 @@ void run_benchmark_suite() {
+                 generate_game_workload(source.data(), n, batch, scenario, seed);
+                 ReferenceData ref = build_reference(source.data(), n, batch);
+ 
+-                for (std::size_t m = 0; m < methods.size(); ++m) {
++                for (std::size_t slot = 0; slot < methods.size(); ++slot) {
++                    const std::size_t m = (r % 2 == 0) ? slot : methods.size() - 1 - slot;
+                     std::memcpy(work.data(), source.data(), n * batch * sizeof(Item));
+ 
+                     // Standard C++20 compiler fence to prevent dead-code elimination or reordering
+@@ -245,9 +253,13 @@ void run_benchmark_suite() {
+                         std::chrono::duration<double, std::micro>(stop - start).count() / batch;
+                     verify_sorted_batch(work.data(), n, batch, ref, static_cast<std::uint8_t>(m + 1));
+                     timings[m].push_back(per_array_us);
++                    samples << FORMAT_NAME << ',' << scenario_name(scenario) << ',' << n << ','
++                            << methods[m].name << ',' << r + 1 << ',' << seed << ',' << slot + 1
++                            << ',' << batch << ',' << per_array_us << '\n';
+                 }
+             }
+ 
++            samples.flush();
+             auto median_of = [](std::vector<double>& v) {
+                 std::sort(v.begin(), v.end());
+                 return v[v.size() / 2];

@@ -1,4 +1,4 @@
-#include "hybrid_sorts.hpp"
+#include "simd/kernels.hpp"
 
 namespace hsort {
 
@@ -60,7 +60,8 @@ inline bool probe_and_handle_global_trend(Item* data, std::size_t n) noexcept {
 }
 
 inline void pingpong_merge_pair(const Item* __restrict src, Item* __restrict dst,
-                                std::size_t begin, std::size_t mid, std::size_t end) noexcept {
+                                std::size_t begin, std::size_t mid, std::size_t end,
+                                const auto& kernels) noexcept {
     // Fast-path: if already ordered across the boundary, bulk-copy to the ping-pong target
     if (mid >= end || src[mid - 1] <= src[mid]) {
         std::memcpy(dst + begin, src + begin, (end - begin) * sizeof(Item));
@@ -84,23 +85,29 @@ inline void pingpong_merge_pair(const Item* __restrict src, Item* __restrict dst
     }
 
     // Merge only the overlapping interior window
-    detail::bidirectional_branchless_merge(src, dst, trim_left, mid, trim_right);
+    kernels.merge(src, dst, trim_left, mid, trim_right);
 }
 
 inline void pingpong_merge_pass(const Item* __restrict src, Item* __restrict dst,
-                                std::size_t begin, std::size_t end, std::size_t width) noexcept {
+                                std::size_t begin, std::size_t end, std::size_t width,
+                                const auto& kernels) noexcept {
     for (std::size_t first = begin; first < end; first += 2 * width) {
         const std::size_t mid  = std::min(end, first + width);
         const std::size_t last = std::min(end, mid + width);
-        pingpong_merge_pair(src, dst, first, mid, last);
+        pingpong_merge_pair(src, dst, first, mid, last, kernels);
     }
 }
 
-} // anonymous namespace
+// Keep the original Idea 4 benchmark's leaf checks and merge calls statically bound.
+struct ScalarKernels {
+    static constexpr auto full_leaf = simd::scalar.full_leaf;
+    static constexpr auto merge = simd::scalar.merge;
+};
 
-void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
+void tiled_sort_impl(Item* data, std::size_t n, const auto& kernels) {
     if (n <= LEAF_SIZE) {
-        detail::insertion_sort_leaf(data, n);
+        if (n == LEAF_SIZE && kernels.full_leaf) kernels.full_leaf(data);
+        else detail::insertion_sort_leaf(data, n);
         return;
     }
 
@@ -116,6 +123,10 @@ void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
 
         for (std::size_t first = tile_begin; first < tile_end; first += LEAF_SIZE) {
             const std::size_t last = std::min(tile_end, first + LEAF_SIZE);
+            if (kernels.full_leaf && last - first == LEAF_SIZE) {
+                kernels.full_leaf(data + first);
+                continue;
+            }
 
             // Reverse any strictly descending prefix inside the 64B leaf before insertion sort
             std::size_t desc_end = first + 1;
@@ -131,7 +142,7 @@ void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
         Item* src = data;
         Item* dst = buffer.data();
         for (std::size_t width = LEAF_SIZE; width < tile_end - tile_begin; width *= 2) {
-            pingpong_merge_pass(src, dst, tile_begin, tile_end, width);
+            pingpong_merge_pass(src, dst, tile_begin, tile_end, width, kernels);
             std::swap(src, dst);
         }
 
@@ -146,13 +157,24 @@ void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
     Item* src = buffer.data();
     Item* dst = data;
     for (std::size_t width = TILE_SIZE; width < n; width *= 2) {
-        pingpong_merge_pass(src, dst, 0, n, width);
+        pingpong_merge_pass(src, dst, 0, n, width, kernels);
         std::swap(src, dst);
     }
 
     if (src != data) {
         std::memcpy(data, src, n * sizeof(Item));
     }
+}
+
+} // anonymous namespace
+
+void tiled_pingpong_merge_sort(Item* data, std::size_t n) {
+    tiled_sort_impl(data, n, ScalarKernels{});
+}
+
+void simd::tiled_sort(Item* data, std::size_t n, Kernels kernels) {
+    if (!kernels.full_leaf && kernels.merge == scalar.merge) tiled_pingpong_merge_sort(data, n);
+    else tiled_sort_impl(data, n, kernels);
 }
 
 } // namespace hsort

@@ -136,13 +136,14 @@ int main(int argc, char** argv) {
         const char* label;
         SortFn      fn;
     };
-    const std::array<AlgoEntry, 6> algos = {{
+    const std::array<AlgoEntry, 7> algos = {{
         {"std::sort",              std_sort_wrapper},
         {"std::stable_sort",       std_stable_sort_wrapper},
         {"cache_leaf_quick",       cache_leaf_quick_sort},
         {"mean_pivot_quick",       mean_pivot_quick_sort},
         {"boundary_trimmed_merge", boundary_trimmed_merge_sort},
-        {"tiled_pingpong_merge",   tiled_pingpong_merge_sort}
+        {"tiled_pingpong_merge",   tiled_pingpong_merge_sort},
+        {simd_sort_label(),        simd_tiled_pingpong_merge_sort}
     }};
 
     std::ofstream csv(csv_out, append ? std::ios::app : std::ios::trunc);

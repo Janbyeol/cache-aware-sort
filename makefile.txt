@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -O3 -march=native -std=c++20 -Wall -Wextra -Iinclude
+CXXFLAGS := -O3 -std=c++20 -Wall -Wextra -Iinclude
 
 COMMON_SRCS := \
 	src/baseline_sorts.cpp \
@@ -7,9 +7,11 @@ COMMON_SRCS := \
 	src/idea2_mean_pivot_quick.cpp \
 	src/idea3_boundary_trimmed_merge.cpp \
 	src/idea4_tiled_pingpong_merge.cpp \
+	src/idea5_simd_tiled_merge.cpp \
+	$(wildcard src/simd/*.cpp) \
 	src/benchmark_api.cpp
 
-COMMON_HEADERS := $(wildcard include/*.hpp)
+COMMON_HEADERS := $(wildcard include/*.hpp src/simd/*.hpp)
 
 all: test_4b test_8b bench_4b bench_8b
 

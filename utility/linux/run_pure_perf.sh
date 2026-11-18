@@ -27,23 +27,11 @@ PURE_4B="$SCRIPT_DIR/pure_perf_4b"
 PURE_8B="$SCRIPT_DIR/pure_perf_8b"
 
 echo "[1/3] pure_perf_4b 및 pure_perf_8b 컴파일 중..."
-g++ -O3 -march=native -std=c++20 -I"$ROOT_DIR/include" \
-    "$ROOT_DIR/src/baseline_sorts.cpp" \
-    "$ROOT_DIR/src/idea1_cache_leaf_quick.cpp" \
-    "$ROOT_DIR/src/idea2_mean_pivot_quick.cpp" \
-    "$ROOT_DIR/src/idea3_boundary_trimmed_merge.cpp" \
-    "$ROOT_DIR/src/idea4_tiled_pingpong_merge.cpp" \
-    "$ROOT_DIR/src/benchmark_api.cpp" \
-    "$SCRIPT_DIR/pure_perf_bench.cpp" -o "$PURE_4B"
-
-g++ -O3 -march=native -std=c++20 -I"$ROOT_DIR/include" -DBENCH_RECORD=1 \
-    "$ROOT_DIR/src/baseline_sorts.cpp" \
-    "$ROOT_DIR/src/idea1_cache_leaf_quick.cpp" \
-    "$ROOT_DIR/src/idea2_mean_pivot_quick.cpp" \
-    "$ROOT_DIR/src/idea3_boundary_trimmed_merge.cpp" \
-    "$ROOT_DIR/src/idea4_tiled_pingpong_merge.cpp" \
-    "$ROOT_DIR/src/benchmark_api.cpp" \
-    "$SCRIPT_DIR/pure_perf_bench.cpp" -o "$PURE_8B"
+sources=("$ROOT_DIR"/src/idea*.cpp "$ROOT_DIR"/src/simd/*.cpp
+         "$ROOT_DIR/src/baseline_sorts.cpp" "$ROOT_DIR/src/benchmark_api.cpp"
+         "$SCRIPT_DIR/pure_perf_bench.cpp")
+g++ -O3 -std=c++20 -I"$ROOT_DIR/include" "${sources[@]}" -o "$PURE_4B"
+g++ -O3 -std=c++20 -I"$ROOT_DIR/include" -DBENCH_RECORD=1 "${sources[@]}" -o "$PURE_8B"
 
 # ------------------------------------------------------------------------------
 # 일괄 측정 모드 (--all 또는 all)

@@ -18,13 +18,20 @@ int main(int argc, char** argv) {
     // 1. Pause hardware performance counters during memory allocation & data generation
     PERF_DISABLE();
 
+    if (argc == 2 && std::strcmp(argv[1], "--simd-label") == 0) {
+        std::cout << simd_sort_label() << '\n';
+        return 0;
+    }
+
     if (argc < 3) {
         std::cout << "Usage: " << argv[0]
-                  << " <algo: std|stable|idea1|idea2|idea3|idea4> <scenario: 0..6> [N=1000000]\n";
+                  << " <algo: std|stable|idea1|idea2|idea3|idea4|idea5> <scenario: 0..6> [N=1000000]\n";
         return 1;
     }
 
     const std::string algo = argv[1];
+    const bool simd = algo == "idea5" || algo == "simd_tiled_pingpong_merge";
+    if (simd) (void)simd_sort_label(); // Resolve the backend before enabling counters.
     const int scen_id      = std::stoi(argv[2]);
     const std::size_t n    = (argc >= 4) ? std::stoull(argv[3]) : 1000000;
 
@@ -40,6 +47,7 @@ int main(int argc, char** argv) {
     else if (algo == "idea2"  || algo == "mean_pivot_quick")       mean_pivot_quick_sort(data.data(), n);
     else if (algo == "idea3"  || algo == "boundary_trimmed_merge") boundary_trimmed_merge_sort(data.data(), n);
     else if (algo == "idea4"  || algo == "tiled_pingpong_merge")   tiled_pingpong_merge_sort(data.data(), n);
+    else if (simd)                                                 simd_tiled_pingpong_merge_sort(data.data(), n);
     else {
         PERF_DISABLE();
         std::cerr << "Unknown algo: " << algo << "\n";

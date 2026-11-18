@@ -27,9 +27,11 @@ $SrcFiles = @(
     (Join-Path $RootDir "src\idea2_mean_pivot_quick.cpp"),
     (Join-Path $RootDir "src\idea3_boundary_trimmed_merge.cpp"),
     (Join-Path $RootDir "src\idea4_tiled_pingpong_merge.cpp"),
+    (Join-Path $RootDir "src\idea5_simd_tiled_merge.cpp"),
     (Join-Path $RootDir "src\benchmark_api.cpp"),
     (Join-Path $ScriptDir "pure_perf_bench.cpp")
 )
+$SrcFiles += (Get-ChildItem -LiteralPath (Join-Path $RootDir "src\simd") -Filter "*.cpp").FullName
 $IncDir = Join-Path $RootDir "include"
 
 # Detect whether the host machine is ARM64 (Snapdragon X Elite) or x64
@@ -85,11 +87,11 @@ set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%PATH%"
 call "$vcvarsPath" $TargetArch >nul
 if errorlevel 1 exit /b 1
 pushd "$objDir4B"
-cl.exe /utf-8 /nologo /O2 /Oi /Ot /GL /std:c++20 /EHsc /DNDEBUG /I"$IncDir" $quotedSrc /Fe"$Pure4B" /link /LTCG >nul
+cl.exe /utf-8 /nologo /O2 /Oi /Ot /std:c++20 /EHsc /DNDEBUG /I"$IncDir" $quotedSrc /Fe"$Pure4B" >nul
 if errorlevel 1 ( popd & exit /b 1 )
 popd
 pushd "$objDir8B"
-cl.exe /utf-8 /nologo /O2 /Oi /Ot /GL /std:c++20 /EHsc /DNDEBUG /DBENCH_RECORD=1 /I"$IncDir" $quotedSrc /Fe"$Pure8B" /link /LTCG >nul
+cl.exe /utf-8 /nologo /O2 /Oi /Ot /std:c++20 /EHsc /DNDEBUG /DBENCH_RECORD=1 /I"$IncDir" $quotedSrc /Fe"$Pure8B" >nul
 if errorlevel 1 ( popd & exit /b 1 )
 popd
 "@

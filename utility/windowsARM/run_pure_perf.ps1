@@ -28,6 +28,7 @@ $SrcFiles = @(
     (Join-Path $RootDir "src\idea3_boundary_trimmed_merge.cpp"),
     (Join-Path $RootDir "src\idea4_tiled_pingpong_merge.cpp"),
     (Join-Path $RootDir "src\idea5_simd_tiled_merge.cpp"),
+    (Join-Path $RootDir "src\idea6_simd_transpose_merge.cpp"),
     (Join-Path $RootDir "src\benchmark_api.cpp"),
     (Join-Path $ScriptDir "pure_perf_bench.cpp")
 )

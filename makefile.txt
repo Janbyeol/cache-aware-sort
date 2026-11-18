@@ -8,6 +8,7 @@ COMMON_SRCS := \
 	src/idea3_boundary_trimmed_merge.cpp \
 	src/idea4_tiled_pingpong_merge.cpp \
 	src/idea5_simd_tiled_merge.cpp \
+	src/idea6_simd_transpose_merge.cpp \
 	$(wildcard src/simd/*.cpp) \
 	src/benchmark_api.cpp
 

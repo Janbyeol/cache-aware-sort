@@ -120,6 +120,9 @@ function Write-Vcxproj([string]$name, [string]$guid, [string]$mainCpp, [bool]$de
     <ClCompile Include="..\src\idea3_boundary_trimmed_merge.cpp" />
     <ClCompile Include="..\src\idea4_tiled_pingpong_merge.cpp" />
     <ClCompile Include="..\src\idea5_simd_tiled_merge.cpp" />
+    <ClCompile Include="..\src\idea6_simd_transpose_merge.cpp">
+      <EnableEnhancedInstructionSet Condition="'`$(Platform)'=='x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
     <ClCompile Include="..\src\simd\*.cpp">
       <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>

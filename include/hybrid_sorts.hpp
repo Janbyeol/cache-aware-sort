@@ -236,6 +236,9 @@ void simd_tiled_pingpong_merge_sort(Item* data, std::size_t n);
 // Experiment label including the selected kernel and enabled stages.
 const char* simd_sort_label();
 
+// [Idea 6] Transpose-Vectorized 256B Quad-Leaf + Dual-Chain Branchless SIMD Tiled Merge Sort (src/idea6_simd_transpose_merge.cpp)
+void simd_transpose_tiled_merge_sort(Item* data, std::size_t n);
+
 // ============================================================================
 // 6. Benchmark & Verification API (src/benchmark_api.cpp)
 // ============================================================================

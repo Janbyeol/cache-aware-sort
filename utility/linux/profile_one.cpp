@@ -25,12 +25,13 @@ int main(int argc, char** argv) {
 
     if (argc < 3) {
         std::cout << "Usage: " << argv[0]
-                  << " <algo: std|stable|idea1|idea2|idea3|idea4|idea5> <scenario: 0..6> [N=1000000]\n";
+                  << " <algo: std|stable|idea1|idea2|idea3|idea4|idea5|idea6> <scenario: 0..6> [N=1000000]\n";
         return 1;
     }
 
     const std::string algo = argv[1];
     const bool simd = algo == "idea5" || algo == "simd_tiled_pingpong_merge";
+    const bool simd_v2 = algo == "idea6" || algo == "simd_transpose_merge";
     if (simd) (void)simd_sort_label(); // Resolve the backend before enabling counters.
     const int scen_id      = std::stoi(argv[2]);
     const std::size_t n    = (argc >= 4) ? std::stoull(argv[3]) : 1000000;
@@ -48,6 +49,7 @@ int main(int argc, char** argv) {
     else if (algo == "idea3"  || algo == "boundary_trimmed_merge") boundary_trimmed_merge_sort(data.data(), n);
     else if (algo == "idea4"  || algo == "tiled_pingpong_merge")   tiled_pingpong_merge_sort(data.data(), n);
     else if (simd)                                                 simd_tiled_pingpong_merge_sort(data.data(), n);
+    else if (simd_v2)                                              simd_transpose_tiled_merge_sort(data.data(), n);
     else {
         PERF_DISABLE();
         std::cerr << "Unknown algo: " << algo << "\n";

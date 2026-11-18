@@ -59,6 +59,7 @@ ALGOS=(
     "boundary_trimmed_merge"
     "tiled_pingpong_merge"
     "simd_tiled_pingpong_merge"
+    "simd_transpose_merge"
 )
 EVENTS="cycles,instructions,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,branches,branch-misses"
 

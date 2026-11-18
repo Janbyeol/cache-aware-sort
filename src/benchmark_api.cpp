@@ -23,7 +23,8 @@ const std::vector<MethodInfo>& get_all_sort_methods() {
         {"mean_pivot_quick",     mean_pivot_quick_sort},
         {"trimmed_merge",        boundary_trimmed_merge_sort},
         {"tiled_pingpong_merge", tiled_pingpong_merge_sort},
-        {simd_sort_label(),      simd_tiled_pingpong_merge_sort}
+        {simd_sort_label(),      simd_tiled_pingpong_merge_sort},
+        {"simd_transpose_merge", simd_transpose_tiled_merge_sort}
     };
     return methods;
 }
@@ -216,8 +217,9 @@ void run_benchmark_suite() {
                   << std::setw(14) << "Idea3(Trim)"
                   << std::setw(14) << "Idea4(Tiled)"
                   << std::setw(14) << "Idea5(SIMD)"
+                  << std::setw(14) << "Idea6(SIMD2)"
                   << std::setw(13) << "Best vs std" << "\n"
-                  << std::string(101, '-') << "\n";
+                  << std::string(115, '-') << "\n";
 
         for (std::size_t n : BENCH_SIZES) {
             const std::size_t batch = std::max<std::size_t>(1, std::min<std::size_t>(512, 32768 / n));
@@ -275,6 +277,7 @@ void run_benchmark_suite() {
                       << std::setw(14) << medians[5]
                       << std::setw(14) << medians[6]
                       << std::setw(14) << medians[7]
+                      << std::setw(14) << medians[8]
                       << std::setw(12) << (std_sort_us / best_custom_us) << "x\n";
         }
     }

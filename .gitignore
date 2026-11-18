@@ -54,6 +54,7 @@ $RECYCLE.BIN/
 *_results.md
 docs/**/*.md
 !docs/windows-x64/**/README.md
+!docs/idea6-simd-transpose/*.md
 test_4b
 test_8b
 bench_4b

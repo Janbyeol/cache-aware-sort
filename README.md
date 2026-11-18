@@ -135,31 +135,31 @@ Set `HSORT_SIMD_ISA` before launch to `auto` (default), `scalar`, `sse2`, `avx2`
 4. **Clean Cache-Line Preservation, `O(1)` Outer-Boundary Check & Run-Boundary Short-Circuiting**: Skips memory stores on already-sorted 256B quad-leaves to avoid dirtying cache lines on nearly-sorted inputs, combines Idea 3's `O(1)` outer-boundary check with binary boundary trimming, and short-circuits merge passes when all run boundaries are ordered.
 5. **Stack-Resident L1 Scratch for `N <= TILE_SIZE` (8 KiB) & Single-TU Inlining**: Avoids heap allocation on small/medium arrays and eliminates Windows x64 non-volatile `xmm6`–`xmm15` spill overhead across leaf and merge calls.
 
-#### Idea 6 Head-to-Head Results (`N = 1,000,000`, Windows x64 · Intel Core Ultra 7 270K Plus · `g++ -O3`, median ms)
+#### Idea 6 Head-to-Head Results (`N = 1,000,000`, Windows x64 · Intel Core Ultra 7 270K Plus · `g++ -O3`)
 
-**4-Byte Integer Keys (`key_only_4b`)**
+**4-Byte Integer Keys (`key_only_4b`, median time in ms)**
 
-| Workload | `std::sort` | `Idea 3 (Trim)` | `Idea 4 (Tiled)` | `Idea 5 (SIMD)` | **Idea 6** | vs. `std::sort` | vs. `Idea 4` | vs. `Idea 5` |
+| Workload | `std::sort` | Idea&nbsp;3 | Idea&nbsp;4 | Idea&nbsp;5 | **Idea&nbsp;6** | vs.&nbsp;`std::sort` | vs.&nbsp;Idea&nbsp;4 | vs.&nbsp;Idea&nbsp;5 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Random 3D distances | 45.54 ms | 24.51 ms | 22.56 ms | 13.14 ms | **6.76 ms** | **6.73×** | **3.33×** | **1.94×** |
-| Frame jitter | 26.24 ms | 15.62 ms | 16.64 ms | 10.32 ms | **5.90 ms** | **4.45×** | **2.82×** | **1.75×** |
-| Append 5% tail | 17.50 ms | 3.76 ms | 4.57 ms | 3.63 ms | **3.06 ms** | **5.71×** | **1.49×** | **1.19×** |
-| Distance buckets | 22.88 ms | 24.42 ms | 22.27 ms | 13.10 ms | **6.55 ms** | **3.49×** | **3.40×** | **2.00×** |
-| Mostly descending | 3.30 ms | 19.30 ms | 2.98 ms | 2.82 ms | **2.23 ms** | **1.48×** | **1.34×** | **1.27×** |
-| Gaussian-like | 40.68 ms | 24.29 ms | 22.79 ms | 13.33 ms | **6.98 ms** | **5.83×** | **3.27×** | **1.91×** |
-| Organ pipe | 39.97 ms | 11.37 ms | 9.24 ms | 4.48 ms | **3.86 ms** | **10.34×** | **2.39×** | **1.16×** |
+| Random&nbsp;3D&nbsp;distances | 45.54 | 24.51 | 22.56 | 13.14 | **6.76** | **6.73×** | **3.33×** | **1.94×** |
+| Frame&nbsp;jitter | 26.24 | 15.62 | 16.64 | 10.32 | **5.90** | **4.45×** | **2.82×** | **1.75×** |
+| Append&nbsp;5%&nbsp;tail | 17.50 | 3.76 | 4.57 | 3.63 | **3.06** | **5.71×** | **1.49×** | **1.19×** |
+| Distance&nbsp;buckets | 22.88 | 24.42 | 22.27 | 13.10 | **6.55** | **3.49×** | **3.40×** | **2.00×** |
+| Mostly&nbsp;descending | 3.30 | 19.30 | 2.98 | 2.82 | **2.23** | **1.48×** | **1.34×** | **1.27×** |
+| Gaussian-like | 40.68 | 24.29 | 22.79 | 13.33 | **6.98** | **5.83×** | **3.27×** | **1.91×** |
+| Organ&nbsp;pipe | 39.97 | 11.37 | 9.24 | 4.48 | **3.86** | **10.34×** | **2.39×** | **1.16×** |
 
-**8-Byte Key + Entity ID Records (`key_id_8b`)**
+**8-Byte Key + Entity ID Records (`key_id_8b`, median time in ms)**
 
-| Workload | `std::sort` | `Idea 3 (Trim)` | `Idea 4 (Tiled)` | `Idea 5 (SIMD)` | **Idea 6** | vs. `std::sort` | vs. `Idea 4` | vs. `Idea 5` |
+| Workload | `std::sort` | Idea&nbsp;3 | Idea&nbsp;4 | Idea&nbsp;5 | **Idea&nbsp;6** | vs.&nbsp;`std::sort` | vs.&nbsp;Idea&nbsp;4 | vs.&nbsp;Idea&nbsp;5 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Random 3D distances | 43.85 ms | 32.25 ms | 29.32 ms | 32.54 ms | **18.19 ms** | **2.41×** | **1.61×** | **1.79×** |
-| Frame jitter | 25.90 ms | 19.05 ms | 21.99 ms | 21.62 ms | **14.00 ms** | **1.85×** | **1.57×** | **1.54×** |
-| Append 5% tail | 17.46 ms | 4.74 ms | 8.33 ms | 9.18 ms | **6.56 ms** | **2.66×** | **1.27×** | **1.40×** |
-| Distance buckets | 22.70 ms | 32.63 ms | 29.56 ms | 33.21 ms | **18.30 ms** | **1.24×** | **1.62×** | **1.81×** |
-| Mostly descending | 4.33 ms | 22.67 ms | 6.01 ms | 6.82 ms | **4.47 ms** | **0.97×** | **1.34×** | **1.53×** |
-| Gaussian-like | 39.14 ms | 32.21 ms | 29.85 ms | 33.04 ms | **18.75 ms** | **2.09×** | **1.59×** | **1.76×** |
-| Organ pipe | 40.33 ms | 12.45 ms | 13.07 ms | 13.67 ms | **10.75 ms** | **3.75×** | **1.22×** | **1.27×** |
+| Random&nbsp;3D&nbsp;distances | 43.85 | 32.25 | 29.32 | 32.54 | **18.19** | **2.41×** | **1.61×** | **1.79×** |
+| Frame&nbsp;jitter | 25.90 | 19.05 | 21.99 | 21.62 | **14.00** | **1.85×** | **1.57×** | **1.54×** |
+| Append&nbsp;5%&nbsp;tail | 17.46 | 4.74 | 8.33 | 9.18 | **6.56** | **2.66×** | **1.27×** | **1.40×** |
+| Distance&nbsp;buckets | 22.70 | 32.63 | 29.56 | 33.21 | **18.30** | **1.24×** | **1.62×** | **1.81×** |
+| Mostly&nbsp;descending | 4.33 | 22.67 | 6.01 | 6.82 | **4.47** | **0.97×** | **1.34×** | **1.53×** |
+| Gaussian-like | 39.14 | 32.21 | 29.85 | 33.04 | **18.75** | **2.09×** | **1.59×** | **1.76×** |
+| Organ&nbsp;pipe | 40.33 | 12.45 | 13.07 | 13.67 | **10.75** | **3.75×** | **1.22×** | **1.27×** |
 
 See the **[Idea 6 Design and Benchmark Guide](docs/idea6-simd-transpose/README.md)** for full architectural diagrams, microarchitectural analysis, and multi-scale (`N = 128 .. 1,000,000`) benchmark tables.
 

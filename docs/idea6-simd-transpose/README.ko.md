@@ -1,12 +1,21 @@
-# Idea 6: 수직 정렬 네트워크·레지스터 행렬 전치 기반 4-리프 슈퍼블록 & 양방향 이중 체인 무분기 SIMD 타일 병합 정렬
+# Idea 6: 수직 정렬 네트워크·레지스터 행렬 전치 기반 4-리프 슈퍼블록 & 양방향 이중 체인 무분기 SIMD 타일 병합 정렬 (AVX2 & ARM64 NEON)
 
 **한국어** | [English](README.md)
 
-이 문서는 초기 4개 아이디어(Idea 1 ~ Idea 4)와 첫 번째 SIMD 실험(Idea 5)을 거친 뒤, Idea 5에서 관찰된 마이크로아키텍처 병목을 해결하기 위해 설계한 **Idea 6 (`simd_transpose_merge` / `simd_transpose_tiled_merge_sort`)**의 출발 가설, 병목 원인 분석, 5대 설계 메커니즘, 그리고 Idea 4·Idea 5·Idea 6 정면 비교 실험 결과를 기록합니다.
+이 문서는 초기 4개 아이디어(Idea 1 \~ Idea 4)와 첫 번째 SIMD 실험(Idea 5)을 거친 뒤, **x86-64 AVX2(256-bit)** 와 **Windows ARM64 NEON(128-bit, Snapdragon X Elite / Oryon)** 양쪽 아키텍처에서 관찰된 마이크로아키텍처 및 컴파일러 백엔드 병목을 해결하기 위해 설계한 **Idea 6 (`simd_transpose_merge` / `simd_transpose_tiled_merge_sort`)** 의 출발 가설, 어셈블리 수준 병목 원인 분석, 핵심 설계 메커니즘, 시행착오(v1\~v4) 엔지니어링 로그, 그리고 정면 비교 실험 결과를 기록합니다.
 
 ---
 
-## 1. 시작 질문과 Idea 1~5로부터의 진화
+## 목차
+1. [시작 질문과 Idea 1\~5로부터의 진화](#1-시작-질문과-idea-15로부터의-진화)
+2. [마이크로아키텍처 및 컴파일러 병목 원인 분석 (AVX2 & ARM64 NEON)](#2-마이크로아키텍처-및-컴파일러-병목-원인-분석-avx2--arm64-neon)
+3. [Idea 6의 핵심 아키텍처 설계와 구현](#3-idea-6의-핵심-아키텍처-설계와-구현)
+4. [ARM64 NEON 단계별 최적화 시행착오 기록 (Baseline → v1 → v2 → v3 → v4)](#4-arm64-neon-단계별-최적화-시행착오-기록-baseline--v1--v2--v3--v4)
+5. [전체 알고리즘 정면 비교 결과 (Windows x64 AVX2 & Windows ARM64 NEON)](#5-전체-알고리즘-정면-비교-결과-windows-x64-avx2--windows-arm64-neon)
+
+---
+
+## 1. 시작 질문과 Idea 1\~5로부터의 진화
 
 1. **Idea 1 (64B 캐시 라인 리프 컷오프)**: 64바이트(`LEAF_SIZE`: 4B 키 16개, 8B 레코드 8개) 이하 구간에서는 분할 재귀를 멈추고 작은 블록 단위 정렬로 처리해 분기와 호출 오버헤드를 줄인다.
 2. **Idea 3 (양방향 무분기 병합 + `O(1)` 외곽 경계 확인)**:
@@ -15,146 +24,193 @@
 3. **Idea 4 (전역 추세 프로브 + 8 KiB L1 타일링 + 핑퐁 병합)**:
    - 8 KiB(`TILE_SIZE`) 단위로 로컬 리프 정렬과 초기 병합을 L1D 캐시 안에서 끝내고, `data`와 `scratch` 버퍼를 교대(Ping-Pong)하여 매 단계 `memcpy`로 되돌리는 대역폭 낭비를 줄인다.
 4. **Idea 5 (첫 번째 SIMD 비토닉 리프 + 단방향 벡터 병합 실험)**:
-   - 64B 리프 1개를 가로 퍼뮤트(`vpermd`) 비토닉 네트워크로 정렬하고 단방향 벡터 비토닉 병합 루프를 적용했다. 4B 키에서는 효과가 있었으나, **8B 레코드(`{ key, entity_id }`)에서는 오히려 스칼라 `Idea 4`보다 느려지는 현상**이 관찰되었다.
+   - 64B 리프 1개를 가로 퍼뮤트(`vpermd` / NEON 셔플) 비토닉 네트워크로 정렬하고 단방향 벡터 비토닉 병합 루프를 적용했다.
+   - 그러나 **x86-64 AVX2에서는 8B 레코드(`{ key, entity_id }`)가 스칼라 `Idea 4`보다 느려졌고**, **ARM64 NEON(Snapdragon X Elite)에서는 4B와 8B 모두 `std::sort`보다 느려지는 심각한 병목**이 관찰되었다.
 
 여기서 **Idea 6**의 핵심 질문이 출발했습니다.
 
-> *"왜 64B 리프 1개 단위 가로 비토닉 정렬과 단방향 SIMD 병합 루프(Idea 5)는 8B 레코드에서 스칼라 Idea 4보다 느려졌고, 4B에서도 병합 단계에서 손실이 발생했을까? Idea 1·3·4의 핵심 통찰(양방향 이중 체인, `O(1)` 외곽 경계 확인, L1 타일 패스 축소)을 SIMD 레지스터 수준으로 그대로 끌어올리면 이 병목을 완전히 깰 수 있지 않을까?"*
+> *"왜 64B 리프 1개 단위 가로 비토닉 정렬과 단방향 SIMD 병합 루프(Idea 5)는 8B 레코드와 ARM64 NEON 환경에서 `std::sort`보다 느려졌을까? 어셈블리 수준에서 실제 병목을 규명하고, Idea 1·3·4의 핵심 통찰(양방향 이중 체인, `O(1)` 외곽 경계 확인, L1 타일 패스 축소)을 AVX2와 ARM64 NEON 각각의 레지스터 아키텍처에 맞게 재설계하면 모든 시나리오에서 `std::sort`를 압도할 수 있지 않을까?"*
 
 ---
 
-## 2. Idea 5에서 드러난 5가지 마이크로아키텍처 병목 원인 분석
+## 2. 마이크로아키텍처 및 컴파일러 병목 원인 분석 (AVX2 & ARM64 NEON)
 
 ### 병목 ①: 가로 방향(Horizontal) 벡터 내부 정렬의 Cross-Lane 퍼뮤트 병목
-256비트 AVX2 레지스터(`__m256i`) 하나 안에서 8개 원소를 비토닉 네트워크로 정렬하려고 매 단계마다 `_mm256_permutevar8x32_epi32`(`vpermd`)를 호출하면:
-- `vpermd`는 128비트 레인 경계를 가로지르는 Cross-lane 명령어로 **지연 시간(Latency)이 3사이클**이며 **실행 포트 5(Port 5) 하나에서만 실행**됩니다.
-- 매 퍼뮤트마다 인덱스 상수 벡터를 적재해야 하므로 레지스터 압박과 포트 5 병목이 동시에 발생합니다.
+- **AVX2**: 256비트 레지스터(`__m256i`) 하나 안에서 8개 원소를 비토닉 네트워크로 정렬하려고 매 단계마다 `_mm256_permutevar8x32_epi32`(`vpermd`)를 호출하면, 128비트 레인 경계를 가로지르는 **3사이클 지연 시간과 Port 5 단일 포트 병목**이 발생합니다.
+- **ARM64 NEON**: `neon.s` 디스어셈블 결과, `Network<Neon>::full_leaf`는 16개 원소(64B)를 정렬하기 위해 4개 벡터 내부의 레인들을 끊임없이 섞는 수평 바이트닉 네트워크로 컴파일되어 **리프 1개당 166개의 NEON 명령어**를 실행하고 있었습니다.
 
-### 병목 ②: 단방향 SIMD 비토닉 병합의 `carry` 레지스터 직렬 의존성과 분기 실패
+### 병목 ②: 단방향 SIMD 비토닉 병합의 `carry` 레지스터 직렬 의존성 (21 사이클 지연 바닥)
 두 정렬된 배열을 SIMD 비토닉 병합기로 합칠 때 한 방향(앞에서 뒤)으로만 진행하면 매 반복마다:
+
 $$\text{merge\_vec}(\text{next\_vec}, \text{carry}) \rightarrow (\text{out\_low}, \text{new\_carry})$$
-를 계산해야 합니다. 다음 반복의 비토닉 병합은 이전 반복의 `new_carry`가 나와야만 시작될 수 있으므로, **비토닉 병합 네트워크 전체 깊이(3~4단계의 셔플+비교+블렌드, 약 15~20사이클)가 루프 간 직렬 의존성(Loop-carried dependency)으로 그대로 노출**됩니다.
-- 특히 8B 레코드에서는 256비트 벡터 하나에 원소가 **4개**뿐이므로, 4개 원소를 내보낼 때마다 직렬 비토닉 네트워크 지연 시간을 전부 기다려야 해 스칼라 양방향 무분기 병합(Idea 3·4)보다 느려집니다.
-- 여기에 다음 벡터를 어느 쪽(`left` vs `right`)에서 읽을지 결정하는 코드가 참조 바인딩이나 중간 `break` 분기로 컴파일되고 꼬리 구간에서 `std::merge`를 2회 호출하면, 무작위 데이터에서 **50% 확률의 분기 예측 실패(약 15~20사이클 페널티)**가 반복됩니다.
 
-### 병목 ③: 8B 레코드(`{ int32_t key, uint32_t entity_id }`) 비교 시 하드웨어 `min/max` 부재와 이중 비교 비용
-- 64비트 스칼라 코드에서는 범용 레지스터(`rax`, `rcx`)가 원래 8바이트이므로 `cmov` 1번으로 8B 레코드 전체를 이동할 수 있어 4B와 비용 차이가 거의 없습니다.
-- 반면 AVX2에는 32비트용 `vpminsd`/`vpmaxsd`(1사이클)는 있어도 8B `{ key, id }` 레코드 전용 하드웨어 `min/max`가 없습니다. 한 레지스터 안에서 `min`용 비교(`cmpgt(a, b)`)와 `max`용 비교(`cmpgt(b, a)`)를 따로 수행하면 매 단계마다 비교(`vpcmpgtd`), 64비트 마스크 확장 셔플(`vpshufd`), 바이트 블렌드(`vpblendvb`)가 2배로 실행됩니다.
+를 계산해야 합니다. 다음 반복의 비토닉 병합은 이전 반복의 `new_carry`가 나와야만 시작될 수 있습니다.
+- **ARM64 NEON 실측 검증**: `neon.s` 분석 결과, `Network<Neon>::merge`는 1회 반복(원소 4개 = 16B 출력)마다 단일 `carry` 벡터가 **역순 뒤집기(`rev64` + `ext`, 2명령어) + 2단계 바이트닉 버터플라이(9명령어) = 총 11개 NEON 명령어(직렬 지연 시간 \~21 사이클)**를 통과해야 했습니다.
+- `N = 1,000,000`에서 16개 병합 패스 동안 실행되는 벡터 병합 횟수는 $1,000,000 / 4 \times 16 = 4,000,000$회이므로, 단일 체인 구조에서는 **$4,000,000 \times 21\text{ cycles} = 84\text{M cycles}$ 이하로 절대 내려갈 수 없는 지연 시간 한계(Latency Floor)**에 갇혀 있었습니다(실제 측정된 하드웨어 사이클: **85.15M 사이클 / 28.82 ms**).
 
-### 병목 ④: 이미 정렬된 캐시 라인의 무조건 쓰기(Store)로 인한 Dirty 캐시 라인 폭증
-`append_5pct_new`(앞 95% 정렬)나 `mostly_descending`(전역 양끝 스왑 후 대부분 정렬) 워크로드에서 스칼라 삽입 정렬은 이미 정렬된 리프를 **읽기만 하고 메모리에 쓰지 않아** 캐시 라인이 Clean 상태로 유지됩니다. 반면 무조건 SIMD 네트워크를 돌리고 `_mm256_storeu_si256`으로 덮어쓰면 **수 메가바이트의 캐시 라인이 전부 Modified(Dirty) 상태**로 바뀌어 L2/L3/DRAM Writeback 트래픽이 급증합니다.
+### 병목 ③: LLVM/Clang AArch64 백엔드의 De-If-Conversion (`CodeGenPrepare` `select-opt`) 함정
+- `include/hybrid_sorts.hpp`의 `bidirectional_branchless_merge`는 C++ 소스 상에서 분기 예측 실패를 없애기 위해 삼항 연산자와 불리언 포인터 산술 연산(`l_fwd += !take_right; r_fwd += take_right;`)으로 작성되어 있었습니다.
+- 그러나 `clang++ -O3 -S`로 추출한 ARM64 어셈블리(`idea4.s` 659\~685행, `neon.s` 230\~258행)를 분석한 결과, **LLVM AArch64 백엔드(`aarch64-enable-select-opt`)가 불리언 포인터 갱신을 "메모리 로드 주소 지연 사슬을 줄인다"는 휴리스틱에 의해 다시 조건 분기(`b.ge`, `b.le`) 2개로 역변환(De-If-Conversion)**하고 있었습니다:
+  ```armasm
+  // idea4.s (lines 659-685) - Clang이 Branchless C++ 코드를 다시 조건 분기로 역변환한 어셈블리
+  .LBB4_22:
+      ldr   w16, [x14]          // *r_fwd
+      ldr   w17, [x13]          // *l_fwd
+      cmp   w16, w17
+      csel  w16, w16, w17, lt   // 값 선택은 csel을 쓰면서...
+      b.ge  .LBB4_24            // [치명적!] 순방향 포인터 갱신을 위해 50% 확률의 조건 분기(b.ge) 생성!
+      mov   x16, x13
+      b     .LBB4_25
+  .LBB4_24:
+      add   x16, x13, #4
+  .LBB4_25:
+      ...
+      cmp   w18, w17
+      b.le  .LBB4_27            // [치명적!] 역방향 포인터 갱신에서도 두 번째 조건 분기(b.le) 생성!
+  ```
+- 이로 인해 루프 1회(원소 2개 병합)마다 **예측 불가능한(50% 확률) 조건 분기 2개가 실행**되어 Snapdragon X Elite(Oryon) 파이프라인에서 `N = 1,000,000` 기준 **66.54 ms (185.4M 사이클)**까지 성능이 급락했습니다.
 
-### 병목 ⑤: 소규모 배열의 힙 할당 오버헤드와 Windows x64 ABI 비휘발성 XMM 레지스터 스필
-- `N <= 2048`(8 KiB 이하)인 소규모 정렬에서도 매번 `operator new[]`/`delete[]`를 호출하면 실제 정렬 시간보다 힙 할당기 시간이 더 커집니다.
-- Windows x64 호출 규약에서는 `xmm6`~`xmm15`가 **비휘발성(Callee-saved)** 레지스터입니다. 리프 정렬이나 병합 커널을 함수 포인터로 분리된 번역 단위에서 간접 호출하면 매 리프마다 `xmm6`~`xmm15`를 스택에 저장·복원하는 ABI 오버헤드가 발생합니다.
+### 병목 ④: 8B 레코드(`{ int32_t key, int32_t id }`)에서 128-bit NEON 2-Lane AoS 한계와 AVX2 이중 비교 비용
+- **AVX2**: 32비트용 `vpminsd`/`vpmaxsd`는 있어도 8B `{ key, id }` 전용 하드웨어 `min/max`가 없어 `min`용 비교와 `max`용 비교를 따로 수행하면 비교·셔플·블렌드 비용이 2배로 증가합니다.
+- **ARM64 NEON**: 128비트 NEON 레지스터 하나에 8B 레코드가 **단 2개**만 들어가므로, AoS(Array-of-Structures) 상태로 처리하던 Idea 5(`src/simd/neon.cpp`)는 매 단계마다 메모리에서 16바이트 마스크(`vld1q_u32`)를 로드하고 `vbslq_s32`를 수행하느라 **51.21 ms (150.2M 사이클)**가 소요되었습니다.
+
+### 병목 ⑤: 이미 정렬된 캐시 라인의 Dirty 스토어 오염 & `4_Mostly_Descending`의 8 MB 힙 할당 페이지 폴트
+- 이미 정렬된 리프/슈퍼블록에 무조건 SIMD 스토어를 수행하면 Clean 캐시 라인이 Modified(Dirty) 상태로 오염되어 L2/L3 Writeback 트래픽이 증가합니다.
+- 또한 `4_Mostly_Descending`처럼 역전(`std::reverse`) 후 약간의 로컬 노이즈만 남은 배열에서 전체 핑퐁 병합으로 진입하면, **8 MB `scratch` 버퍼 힙 할당으로 인한 OS 소프트 페이지 폴트(2,048회, \~3.5 ms)**가 실제 정렬 시간보다 더 크게 발생합니다.
 
 ---
 
-## 3. Idea 6의 5대 핵심 설계와 구현
+## 3. Idea 6의 핵심 아키텍처 설계와 구현
 
-[`src/idea6_simd_transpose_merge.cpp`](../../src/idea6_simd_transpose_merge.cpp)는 위 5가지 병목을 다음과 같이 해결합니다.
+[`src/idea6_simd_transpose_merge.cpp`](../../src/idea6_simd_transpose_merge.cpp)는 위 병목들을 다음과 같이 해결합니다.
 
-### 설계 1: 수직(Vertical) 정렬 네트워크 + 레지스터 행렬 전치 기반 4-리프 슈퍼블록(256B) 정렬 (`sort_quad_leaf_avx2`)
+### 설계 1: 수직(Vertical) 정렬 네트워크 + 레지스터 행렬 전치 기반 256B Quad-Leaf 정렬 (`sort_quad_leaf_avx2` / `sort_quad_leaf_neon`)
 
-64B 리프 1개를 가로로 정렬하는 대신, **4개의 캐시 라인(`4 * LEAF_SIZE = 256B`, YMM 레지스터 8개 `r0..r7`: 4B 키 64개 또는 8B 레코드 32개)**을 한 번에 레지스터에 적재합니다.
+64B 리프 1개를 가로로 정렬하는 대신, **4개의 캐시 라인(`4 * LEAF_SIZE = 256B`: 4B 키 64개 또는 8B 레코드 32개)**을 한 번에 레지스터(AVX2: YMM 8개 / ARM64 NEON: Q 레지스터 16개)에 적재합니다.
 
 ```
-[적재 직후: 8개 YMM 레지스터 r0..r7]
-         Lane 0   Lane 1   ...   Lane 7
-  r0  [  d[0]     d[1]     ...   d[7]   ]
-  r1  [  d[8]     d[9]     ...   d[15]  ]
-  ...
-  r7  [  d[56]    d[57]    ...   d[63]  ]
-          │        │              │
-          ▼        ▼              ▼
-  1단계: 수직(Column-wise) 정렬 네트워크 (셔플 0회! 순수 vpminsd/vpmaxsd)
-          │
-          ▼
-  2단계: 레지스터 내부 8×8 (또는 4×4×2) 행렬 전치 (unpacklo/hi + permute2x128)
-          │
-          ▼
-  [전치 직후: r0..r7 각각이 가로로 완전히 정렬된 벡터가 됨!]
-          │
-          ▼
-  3~5단계: 레지스터 내부 Odd-Even 벡터 병합으로 256B(4 * LEAF_SIZE) 전체 정렬 완료
+[적재 직후: 256B Quad-Leaf (AVX2 8×YMM / NEON 16×Q 레지스터)]
+          Lane 0   Lane 1   ...   Lane K
+   r0  [  d[0]     d[1]     ...   d[K]   ]
+   r1  [  d[K+1]   d[K+2]   ...   d[2K]  ]
+   ...
+           │        │              │
+           ▼        ▼              ▼
+   1단계: 수직(Column-wise) 정렬 네트워크 (셔플 0회! 순수 min/max 비교기)
+           │
+           ▼
+   2단계: 레지스터 내부 행렬 전치 (AVX2 8×8 / NEON 4×4×4)
+           │
+           ▼
+   [전치 직후: 각 레지스터가 가로로 완전히 정렬된 벡터가 됨!]
+           │
+           ▼
+   3단계: 레지스터 내부 벡터 병합으로 256B(4 * LEAF_SIZE) 단일 정렬 런 완성
 ```
 
-- **4B 모드 (`64 x int32_t`)**:
-  1. `r0..r7`의 각 레인(열)을 최적 8-입력 정렬 네트워크(19개 비교기, 깊이 6)로 수직 정렬합니다. **셔플/퍼뮤트/블렌드가 단 1개도 없으며**, 순수 `vpminsd`/`vpmaxsd` 38개 명령어로 8개 열이 동시에 정렬됩니다.
-  2. `_mm256_unpacklo/hi_epi32`, `_mm256_unpacklo/hi_epi64`, `_mm256_permute2x128_si256` 24개 명령어로 **$8 \times 8$ 레지스터 행렬 전치**를 수행하면 `r0..r7` 8개 레지스터가 모두 가로 방향으로 정렬된 8원소 벡터가 됩니다.
-  3. 레지스터 안에서 2-벡터 병합(4회) → 4-벡터 병합(6회) → 8-벡터 Odd-Even 병합(9회)을 거쳐 **64개 원소(`4 * LEAF_SIZE`)가 단일 정렬 런**으로 완성됩니다.
-- **8B 모드 (`32 x DistanceRecord`)**:
-  1. `r0..r3`와 `r4..r7` 두 묶음에 대해 4-입력 수직 정렬 네트워크(각 5개 비교기, 셔플 0회)를 병렬 실행합니다.
-  2. 두 묶음 각각에 대해 **$4 \times 4$ 64비트 행렬 전치**(각 8개 명령어)를 수행하면 `r0..r7` 8개 레지스터가 모두 정렬된 4-레코드 벡터가 됩니다.
-  3. 동일한 레지스터 내 벡터 병합으로 **32개 레코드(`4 * LEAF_SIZE`)가 단일 정렬 런**으로 완성됩니다.
-- **초기 병합 패스 2단계 완전 제거와 홀수 패스 유지**:
-  - 리프 단계에서 이미 `4 * LEAF_SIZE`(256B) 크기의 정렬 런을 만들었으므로, 8 KiB L1 타일(`128 * LEAF_SIZE`) 내부에서 가장 호출 횟수가 많던 **`width = LEAF_SIZE` 패스와 `width = 2 * LEAF_SIZE` 패스 두 단계가 아예 사라집니다**.
-  - 남은 타일 내부 병합 패스는 `width = 4, 8, 16, 32, 64 (* LEAF_SIZE)`로 **정확히 5회(홀수)**가 되어, 마지막 패스가 추가 복사 없이 자연스럽게 `scratch` 버퍼에 도착합니다.
+- **ARM64 NEON 4B (`64 x int32_t`, 16개 Q 레지스터 `r0..r15`)**:
+  1. 두 개의 독립적인 8-wire 수직 네트워크(각 19개 비교기, **셔플 0회**)와 8×8 수직 홀짝 병합(25개 비교기, **셔플 0회**)을 순수 `vminq_s32`/`vmaxq_s32`로 실행합니다.
+  2. `transpose_4x4_s32`(`vtrn1q_s32`/`vtrn2q_s32` + `vtrn1q_s64`/`vtrn2q_s64`) 4회로 16개 레지스터를 전치합니다.
+  3. 레지스터 내부에서 4+4 및 8+8 벡터 병합을 완료하여 **L1D 메모리 왕복 없이 64개 원소 정렬 런을 한 번에 배출**하고 타일 내부의 초기 병합 패스 2단계(`width = 16, 32`)를 완전히 제거합니다.
+- **ARM64 NEON 8B (`32 x DistanceRecord`, 하드웨어 디인터리빙 SoA Quad-Leaf)**:
+  1. ARM64 전용 **`vld2q_s32`** 명령어로 32개 레코드(256B)를 로드하는 즉시 **8개의 Key 벡터(`k0..k7`)와 8개의 ID 벡터(`i0..i7`)로 하드웨어 분리(AoS → SoA)**합니다.
+  2. 이제 8B 레코드도 벡터당 2개가 아닌 **4개 레코드씩** 8-wire 수직 네트워크(`vcgtq_s32` + `vminq`/`vmaxq` + `vbslq_s32`) → 4×4 전치 → 15회 `merge_vec_neon_8b_soa` → **`vst2q_s32`** 하드웨어 재인터리빙 스토어로 처리됩니다.
 
-### 설계 2: In-Lane 1사이클 즉시값 셔플 & 8B 레코드 단일 비교 동점 보존 커널 (`bitonic_step_8b`)
+### 설계 2: 아키텍처 맞춤 고속 바이트닉 버터플라이 (AVX2 In-Lane 셔플 & NEON Symmetric 3-Stage `vzip` 파이프라인)
 
-- **In-Lane 셔플 우선 설계**:
-  2-벡터 비토닉 병합(`merge_vec_4b`, `merge_vec_8b`)에서 `Distance = 2`와 `Distance = 1` 단계는 128비트 레인 내부 연산입니다. 이를 3사이클 `vpermd` 대신 **1사이클 지연·포트 1/5 동시 실행이 가능한 `_mm256_shuffle_epi32`(`vpshufd`)와 즉시값 `_mm256_blend_epi32`(`vpblendd`)**로 구현해 크리티컬 패스 지연을 절반 이하로 줄였습니다.
-- **8B 레코드 단일 비교 항등식**:
-  한 레지스터 안에서 `min`을 가져야 하는 레인 $i$($\text{Mask}_i = 0$)와 `max`를 가져야 하는 레인 $j = i \oplus D$($\text{Mask}_j = 1$)가 있을 때, 두 레인 모두 **"교환이 필요한 조건"은 $v_i.\text{key} > v_j.\text{key}$ 하나로 동일**합니다.
+- **AVX2 단일 비교 8B 커널 (`bitonic_step_8b`)**:
+  `min` 레인과 `max` 레인의 교환 조건이 $v_i.\text{key} > v_j.\text{key}$ 하나로 동일하다는 항등식을 이용해 `_mm256_cmpgt_epi32` 단 1회 비교만으로 동점 레코드 손실 없이 스왑을 수행합니다.
+- **ARM64 NEON Symmetric 3-Stage `vzip1q_s32` / `vzip2q_s32` 버터플라이**:
+  Clang AArch64 백엔드에서 `vtrn1q_s64`/`vtrn2q_s64`가 불필요한 `mov` + `ins v.d[1], v.d[0]` 명령어를 생성하는 문제를 어셈블리(`idea6_v1_4b.s`)에서 포착하고, 이를 **3단계 연속 `vzip1q_s32` / `vzip2q_s32` + `cas` 대칭 파이프라인**으로 대체하여 레지스터 복사 명령어를 100% 제거했습니다:
   ```cpp
-  template <int Mask>
-  HSORT_ALWAYS_INLINE __m256i bitonic_step_8b(__m256i v, __m256i peer) noexcept {
-      const __m256i l    = _mm256_blend_epi32(v, peer, Mask); // 두 레인 모두에 min-레인 레코드 배치
-      const __m256i r    = _mm256_blend_epi32(peer, v, Mask); // 두 레인 모두에 max-레인 레코드 배치
-      const __m256i cmp  = _mm256_cmpgt_epi32(l, r);          // 단 1회 비교!
-      const __m256i swap = _mm256_shuffle_epi32(cmp, _MM_SHUFFLE(2, 2, 0, 0));
-      return _mm256_blendv_epi8(v, peer, swap);
+  HSORT_ALWAYS_INLINE void bitonic_butterfly_neon_4b(int32x4_t& a, int32x4_t& b) noexcept {
+      int32x4_t z0 = vzip1q_s32(a, b),  z1 = vzip2q_s32(a, b);
+      cas_neon_4b(z0, z1);
+      int32x4_t w0 = vzip1q_s32(z0, z1), w1 = vzip2q_s32(z0, z1);
+      cas_neon_4b(w0, w1);
+      a = vzip1q_s32(w0, w1); // 정렬된 하위 4원소
+      b = vzip2q_s32(w0, w1); // 정렬된 상위 4원소
   }
   ```
-  단 1번의 비교만으로 레코드 손실이나 중복 없이 동점 안전성(tie-safety)이 보장됩니다.
-- **ARM64 NEON 아키텍처 맞춤 설계**:
-  128비트 NEON에서는 8B 레코드가 레지스터당 2개뿐이라 단순 번역 시 병합이 느려지는 문제를 막기 위해, 리프 정렬에서는 NEON 전용 하드웨어 디인터리빙 로드/스토어(`vld2q_s32` / `vst2q_s32`)로 Key 4개와 ID 4개를 별도 레지스터로 분리(SoA)하여 4-레인으로 정렬하고, 큰 구간 병합에서는 ARM64의 64비트 스칼라 `csel` 양방향 무분기 병합과 결합합니다.
 
-### 설계 3: Idea 3에서 착안한 양방향 이중 체인(Dual-Chain Forward + Backward) 무분기 SIMD 병합 (`merge_simd_avx2`)
+### 설계 3: 양방향 이중 체인(`carry_fwd` + `carry_bwd`) 무분기 SIMD 병합 & 역순화 Critical Path 분리
 
-Idea 3·4의 스칼라 `bidirectional_branchless_merge`가 앞과 뒤에서 동시에 병합해 ILP를 2배로 높인 아이디어를 SIMD 비토닉 병합으로 확장했습니다.
+1. **두 개의 독립 의존성 사슬(`carry_fwd`, `carry_bwd`)**:
+   순방향(`->`)과 역방향(`<-`)에서 동시에 SIMD 바이트닉 병합을 진행하여 단일 `carry` 지연 한계(84M 사이클 바닥)를 깨고 ILP를 2배로 확장했습니다.
+2. **역순화 연산을 Loop-Carried `carry` 밖으로 제거**:
+   순방향 병합(`merge_vec_neon_4b_fwd`, `merge_vec_neon_8b_soa_fwd`)에서는 새로 로드한 벡터 `low`를 뒤집고, 역방향 병합(`merge_vec_neon_4b`, `merge_vec_neon_8b_soa`)에서는 새로 로드한 벡터 `high`를 뒤집도록 설계하여, 루프 간 이어지는 `carry_fwd`와 `carry_bwd` 모두 역순화 지연(`rev64` + `ext`)을 Critical Path에서 완전히 제거했습니다.
+3. **`HSORT_UNPREDICTABLE` (`__builtin_unpredictable`)을 통한 하드웨어 `csel` 강제**:
+   LLVM AArch64의 De-If-Conversion을 원천 차단하여 모든 포인터 갱신과 스칼라 꼬리 병합이 100% 무분기 `cmp + cset + csel + add`로 컴파일되도록 보장했습니다.
+4. **8B Dual-Chain 4-Record SoA NEON 병합**:
+   8B 외부 병합에서도 `vld2q_s32`로 한 번에 4개 레코드(32B)씩 디인터리빙 로드하여 6사이클 L1D Load-to-Address 포인터 의존성을 4개 레코드에 걸쳐 상각(레코드당 주소 지연 **6.0cy → 1.5cy**)했습니다.
 
-```
-Left:  [ l_fwd ──► ... 미소비 구간 ... ◄── l_bwd ]
-Right: [ r_fwd ──► ... 미소비 구간 ... ◄── r_bwd ]
+### 설계 4: 데이터 분포 적응형 고속 단락 경로 (Adaptive Fast-Paths)
 
-       ┌─────────────────────────────────────────┐
-       │ 한 루프 반복에서 두 독립 SIMD 체인 동시 실행 │
-       ├────────────────────┬────────────────────┤
-       │ [전방향 체인 (->)]   │ [역방향 체인 (<-)]   │
-       │ cmov로 작은 쪽 로드  │ cmov로 큰 쪽 로드    │
-       │ merge(v_f, carry_f)│ merge(carry_b, v_b)│
-       │ store(out_fwd)     │ store(out_bwd)     │
-       └────────────────────┴────────────────────┘
-```
-
-1. **두 개의 독립 의존성 사슬(`carry_fwd`, `carry_bwd`)**: 전방향 체인이 `merge_vec(v_fwd, carry_fwd)`의 지연을 기다리는 동안 CPU의 비순차 실행 엔진이 역방향 체인의 `merge_vec(carry_bwd, v_bwd)`를 병렬 실행하여 벡터당 유효 처리량을 거의 2배로 높입니다.
-2. **루프 내부 100% 무분기(`cmov`) 포인터 전진**: 참조 바인딩이나 중간 `break` 없이 조건 연산자로 포인터와 증가량을 계산해 무작위 입력에서도 분기 예측 실패가 0입니다.
-3. **중앙 합류 지점의 레지스터 결합 + 무분기 스칼라 마감**: 양방향 루프가 끝나면 `carry_fwd`와 `carry_bwd`를 레지스터 안에서 즉시 `merge_vec(carry_fwd, carry_bwd)` 1회로 합친 뒤, `std::merge` 대신 무분기 스칼라 병합(`branchless_merge_buffers` + `bidirectional_merge_disjoint`)으로 남은 꼬리 원소들을 처리합니다.
-
-### 설계 4: Clean 캐시 라인 보존, `O(1)` 외곽 경계 확인, 런 경계 조기 종료
-
-- **Pre-Sorted 슈퍼블록의 Clean 캐시 라인 보존 (`is_quad_leaf_sorted_avx2`)**: 이미 정렬된 256B 슈퍼블록은 **메모리 Store를 수행하지 않고 즉시 반환**하여 캐시 라인이 Dirty 상태로 오염되는 것을 방지합니다.
-- **Idea 3의 `O(1)` 외곽 경계 확인 결합**: `std::upper_bound` / `std::lower_bound` 호출 전 `src[begin] > src[mid]` 및 `src[end - 1] < src[mid - 1]`을 `O(1)`로 확인해 무작위 데이터에서 수만 번의 이진 탐색 분기 비용을 제거했습니다.
-- **런 경계 정렬 확인을 통한 패스 조기 종료 (`all_run_boundaries_ordered`)**: 각 병합 패스(`width`) 시작 전에 인접한 길이 `width` 런들의 경계가 모두 정렬되어 있으면 남은 패스들과 왕복 `memcpy`를 즉시 생략합니다.
-
-### 설계 5: `N <= TILE_SIZE` (8 KiB) 스택 스크래치 버퍼 및 단일 TU 완전 인라이닝
-
-- `N <= TILE_SIZE`(8 KiB) 이하에서는 힙 할당(`AlignedBuffer`) 대신 이미 L1D와 TLB에 상주하는 `alignas(64) Item stack_scratch[TILE_SIZE]`를 사용합니다.
-- 모든 SIMD 커널을 단일 번역 단위 안에서 정적 인라이닝하여 Windows x64 ABI의 비휘발성 `xmm6`~`xmm15` 저장·복원 오버헤드를 제거했습니다.
+1. **Pre-Sorted Quad-Leaf Clean 캐시 라인 보존 (`is_quad_leaf_sorted_avx2` / `is_quad_leaf_sorted_neon`)**:
+   이미 정렬된 256B 블록은 메모리 쓰기(Store)를 생략해 캐시 라인이 Dirty 상태로 오염되는 것을 방지합니다.
+2. **`O(1)` Disjoint Reversed-Run Fast-Path**:
+   `pingpong_merge_pair` 진입 시 `src[mid - 1] <= src[mid]`(정방향 정렬 완료)뿐만 아니라 **`src[end - 1] <= src[begin]`(오른쪽 런 전체가 왼쪽 런 전체 이하인 역순 블록)**도 `O(1)`에 감지하여 두 번의 `std::memcpy`로 즉시 블록 위치를 교환합니다(`6_Organ_Pipe`에서 **2.4× 추가 가속**).
+3. **Zero-Allocation In-Place Bounded Insertion Sort (`try_bounded_inplace_insertion_sort`)**:
+   전역 추세 프로브(`probe_and_handle_global_trend`)에서 내림차순 배열을 뒤집은 직후, **8 MB 힙 할당(`scratch`)을 수행하기 전에** 로컬 이동 거리(`4 * LEAF_SIZE`)와 총 이동 횟수(`n / 8`)가 제한된 In-Place 삽입 정렬을 시도합니다. 이로써 `4_Mostly_Descending`에서 2,048회의 OS 소프트 페이지 폴트와 16 MB 핑퐁 복사를 100% 제거하여 **0.78 ms (4B) / 0.86 ms (8B)** 만에 정렬을 끝냅니다.
+4. **Equal-Key Plateau Streamer**:
+   병합 도중 양쪽 런에 동일한 키가 연속되는 고중복 구간(`kl == kr && l_fwd[LANES - 1] == kl`)을 만나면 바이트닉 버터플라이를 건너뛰고 벡터 복사 루프로 직통 스트리밍합니다.
 
 ---
 
-## 4. 정확성 검증 및 전체 알고리즘 정면 비교 결과
+## 4. ARM64 NEON 단계별 최적화 시행착오 기록 (Baseline → v1 → v2 → v3 → v4)
 
-### 측정 환경 및 검증
-- **CPU / OS**: Intel Core Ultra 7 270K Plus · Windows x64
-- **컴파일러 및 플래그**: `g++ -O3 -std=c++20 -Wall -Wextra -Iinclude` (8B 모드는 `-DBENCH_RECORD=1`)
-- **정확성 테스트**: `test_4b`, `test_8b` 각각 **4,294개 검증 항목 100% 통과**
+Snapdragon X Elite (`ARM64_Oryon`, `clang++ 23.1.5 -O3`, `N = 1,000,000`)에서 4단계에 걸쳐 가설을 세우고 검증한 엔지니어링 진행 기록입니다.
+
+| 단계 | 핵심 설계 변경 및 시행착오 분석 | 4B `Random` | 4B `Buckets` | 4B `Descending` | 4B `OrganPipe` | 8B `Random` | 8B `Descending` | 8B `OrganPipe` |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **Baseline (Before)** | • Idea 6 ARM64 `N > 16` 폴백 버그<br/>• Clang `b.ge`/`b.le` 역변환으로 분기 실패 폭발 | 66.54 ms<br/>*(0.28×)* | 37.57 ms<br/>*(0.18×)* | 2.78 ms<br/>*(1.70×)* | 7.57 ms<br/>*(4.83×)* | 69.52 ms<br/>*(0.74×)* | 6.17 ms<br/>*(0.63×)* | 11.55 ms<br/>*(3.38×)* |
+| **v1** | • `__builtin_unpredictable`로 `b.ge`/`b.le` 제거<br/>• 4B/8B 256B Quad-Leaf & 4B Dual-Chain NEON 병합<br/>• *문제 발견*: Clang `vtrn1q_s64`가 `mov+ins` 생성, 8B 스칼라 병합의 6cy 주소 지연, `OrganPipe` 역순 병합 오버헤드 | 9.54 ms<br/>*(1.98×)* | 9.54 ms<br/>*(0.73×)* | 2.18 ms<br/>*(2.17×)* | 5.50 ms<br/>*(6.69×)* | 24.22 ms<br/>*(2.12×)* | 4.21 ms<br/>*(0.97×)* | 15.70 ms<br/>*(2.51×)* |
+| **v2** | • 3단계 `vzip1q`/`vzip2q` 대칭 버터플라이로 `mov+ins` 제거<br/>• 8B Dual-Chain 4-Record SoA NEON 병합(`vld2q_s32`)<br/>• `O(1)` Disjoint Reversed-Run Fast-Path 추가<br/>• *문제 발견*: `Mostly_Descending`에서 8 MB 힙 할당 페이지 폴트(\~3.5 ms) 발생 | 9.61 ms<br/>*(1.97×)* | 9.88 ms<br/>*(0.71×)* | 1.95 ms<br/>*(2.43×)* | 2.98 ms<br/>*(12.28×)* | 18.31 ms<br/>*(2.81×)* | 4.34 ms<br/>*(0.92×)* | 6.56 ms<br/>*(5.95×)* |
+| **v3 (최종 채택)** | • Zero-Allocation In-Place Bounded Insertion 추가(페이지 폴트 0회)<br/>• Equal-Key Plateau Streamer 및 8B 단일 로드 정렬 검사 추가 | **9.40 ms**<br/>**(2.01×)** | **8.50 ms**<br/>**(0.81×)** | **0.78 ms**<br/>**(6.03×)** | **2.86 ms**<br/>**(12.77×)** | **18.18 ms**<br/>**(2.83×)** | **0.86 ms**<br/>**(4.48×)** | **6.10 ms**<br/>**(6.39×)** |
+| **v4 (가설 기각)** | • *실험 가설*: `trim_left`를 `lower_bound`로 바꾸고 핫 루프 내 스칼라 잔여분 정리 루프 2개 추가<br/>• *결과*: 첫 버킷 `memcpy` 이득 상실 및 루프 I-Cache 팽창으로 4B `Buckets`가 `9.19 ms`로 소폭 퇴보 확인 후 **즉시 v3로 롤백** | 9.42 ms | 9.19 ms | 0.85 ms | 2.78 ms | 18.55 ms | 0.85 ms | 6.11 ms |
+
+*(괄호 안 배수는 동일 시나리오 `std::sort` 대비 가속비)*
+
+---
+
+## 5. 전체 알고리즘 정면 비교 결과 (Windows x64 AVX2 & Windows ARM64 NEON)
+
+### 5.1 Windows ARM64 (`Snapdragon X Elite / Qualcomm Oryon` · `clang++ 23.1.5 -O3` · `N = 1,000,000`)
+
+- **원시 측정 데이터**: [`docs/windowsARM/pure_cache_results_N=1000000.csv`](../windowsARM/pure_cache_results_N=1000000.csv) · [`docs/windowsARM/pure_cache_results_N=1000000.md`](../windowsARM/pure_cache_results_N=1000000.md)
+- **정확성 검증**: `test_4b`, `test_8b` 각 **4,294개 검증 항목 100% 통과**
+
+#### 4B 정수 키 (`4B_Int32`, `N = 1,000,000`, 중앙값 단위: ms / 하드웨어 사이클: M cycles)
+
+| 시나리오 | `std::sort` | `std::stable_sort` | Idea&nbsp;4 (Scalar) | Idea&nbsp;5 (NEON) | Idea&nbsp;6 (**Before**) | **Idea&nbsp;6 (After v3)** | `std::sort`&nbsp;대비 | Before&nbsp;대비 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
+| `0_Uniform_Random` | 18.86 (55.5M) | 13.55 (39.9M) | 62.50 (184.5M) | 28.82 (84.7M) | 66.54 (185.4M) | **9.40 (27.7M)** | **2.01×** | **7.08×** |
+| `1_Frame_Jitter` | 16.30 (48.0M) | 11.94 (35.3M) | 30.91 (91.1M) | 15.96 (47.3M) | 31.22 (91.4M) | **6.21 (18.5M)** | **2.62×** | **5.03×** |
+| `2_Append_5Pct_New` | 16.46 (48.4M) | 8.18 (24.2M) | 5.90 (17.4M) | 5.74 (16.8M) | 6.49 (17.5M) | **3.24 (9.6M)** | **5.07×** | **2.00×** |
+| `3_Distance_Buckets` | 6.89 (20.2M) | 14.35 (42.3M) | 37.35 (110.0M) | 28.80 (84.8M) | 37.57 (110.7M) | **8.50 (24.7M)** | 0.81× *(stable 대비 1.69×)* | **4.42×** |
+| `4_Mostly_Descending` | 4.72 (13.9M) | 11.55 (34.0M) | 3.33 (9.5M) | 3.55 (10.4M) | 2.78 (8.1M) | **0.78 (2.3M)** | **6.03×** | **3.55×** |
+| `5_Gaussian_Normal` | 14.99 (44.2M) | 16.95 (50.1M) | 57.92 (170.8M) | 28.60 (84.5M) | 58.12 (170.7M) | **9.74 (28.8M)** | **1.54×** | **5.96×** |
+| `6_Organ_Pipe` | 36.58 (108.0M) | 10.88 (32.0M) | 7.53 (22.2M) | 9.67 (28.5M) | 7.57 (22.2M) | **2.86 (8.4M)** | **12.77×** | **2.64×** |
+
+#### 8B 키+ID 레코드 (`8B_Record`, `N = 1,000,000`, 중앙값 단위: ms / 하드웨어 사이클: M cycles)
+
+| 시나리오 | `std::sort` | `std::stable_sort` | Idea&nbsp;4 (Scalar) | Idea&nbsp;5 (NEON) | Idea&nbsp;6 (**Before**) | **Idea&nbsp;6 (After v3)** | `std::sort`&nbsp;대비 | Before&nbsp;대비 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
+| `0_Uniform_Random` | 51.36 (150.8M) | 44.03 (129.7M) | 68.43 (201.9M) | 51.21 (151.0M) | 69.52 (204.6M) | **18.18 (54.0M)** | **2.83×** | **3.82×** |
+| `1_Frame_Jitter` | 28.81 (85.3M) | 34.92 (103.1M) | 37.44 (110.3M) | 28.85 (85.5M) | 37.99 (111.7M) | **13.51 (39.7M)** | **2.13×** | **2.81×** |
+| `2_Append_5Pct_New` | 18.10 (53.4M) | 19.88 (58.5M) | 9.08 (26.5M) | 10.89 (32.0M) | 9.66 (28.4M) | **6.30 (18.7M)** | **2.87×** | **1.53×** |
+| `3_Distance_Buckets` | 20.80 (61.5M) | 43.99 (129.7M) | 42.74 (126.4M) | 50.77 (150.0M) | 44.51 (131.0M) | **15.47 (45.6M)** | **1.35×** | **2.88×** |
+| `4_Mostly_Descending` | 3.86 (11.5M) | 30.60 (90.8M) | 5.79 (17.1M) | 5.98 (17.7M) | 6.17 (18.2M) | **0.86 (2.6M)** | **4.48×** | **7.15×** |
+| `5_Gaussian_Normal` | 44.63 (131.7M) | 43.88 (129.5M) | 63.59 (187.9M) | 50.85 (150.0M) | 64.22 (189.2M) | **18.95 (55.7M)** | **2.36×** | **3.39×** |
+| `6_Organ_Pipe` | 38.99 (115.3M) | 25.91 (76.6M) | 11.07 (32.7M) | 18.40 (54.4M) | 11.55 (34.0M) | **6.10 (18.0M)** | **6.39×** | **1.89×** |
+
+---
+
+### 5.2 Windows x64 (`Intel Core Ultra 7 270K Plus` · `g++ -O3` · `N = 1,000,000`)
+
 - **원시 요약 CSV**: [`key_only_4b_summary.csv`](key_only_4b_summary.csv) · [`key_id_8b_summary.csv`](key_id_8b_summary.csv)
 
-### 4.1 `N = 1,000,000` 정면 비교 — 4B 정수 키 (`key_only_4b`, 단위: ms)
+#### 4B 정수 키 (`key_only_4b`, 단위: ms)
 
 | 시나리오 | `std::sort` | Idea&nbsp;3 | Idea&nbsp;4 | Idea&nbsp;5 | **Idea&nbsp;6** | `std::sort`&nbsp;대비 | Idea&nbsp;4&nbsp;대비 | Idea&nbsp;5&nbsp;대비 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -166,7 +222,7 @@ Right: [ r_fwd ──► ... 미소비 구간 ... ◄── r_bwd ]
 | `gaussian_normal` | 40.68 | 24.29 | 22.79 | 13.33 | **6.98** | **5.83×** | **3.27×** | **1.91×** |
 | `organ_pipe` | 39.97 | 11.37 | 9.24 | 4.48 | **3.86** | **10.34×** | **2.39×** | **1.16×** |
 
-### 4.2 `N = 1,000,000` 정면 비교 — 8B 키+ID 레코드 (`key_id_8b`, 단위: ms)
+#### 8B 키+ID 레코드 (`key_id_8b`, 단위: ms)
 
 | 시나리오 | `std::sort` | Idea&nbsp;3 | Idea&nbsp;4 | Idea&nbsp;5 | **Idea&nbsp;6** | `std::sort`&nbsp;대비 | Idea&nbsp;4&nbsp;대비 | Idea&nbsp;5&nbsp;대비 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -177,15 +233,3 @@ Right: [ r_fwd ──► ... 미소비 구간 ... ◄── r_bwd ]
 | `mostly_descending` | 4.33 | 22.67 | 6.01 | 6.82 | **4.47** | **0.97×** | **1.34×** | **1.53×** |
 | `gaussian_normal` | 39.14 | 32.21 | 29.85 | 33.04 | **18.75** | **2.09×** | **1.59×** | **1.76×** |
 | `organ_pipe` | 40.33 | 12.45 | 13.07 | 13.67 | **10.75** | **3.75×** | **1.22×** | **1.27×** |
-
-- 8B 레코드에서 `Idea 5`가 병합 단계 오버헤드로 인해 7개 중 6개 시나리오에서 `Idea 4`보다 느려졌던 것과 대조적으로, **Idea 6는 7개 모든 시나리오에서 `Idea 4`와 `Idea 5`를 모두 크게 앞지릅니다(Idea 5 대비 최대 1.81× 향상)**.
-
-### 4.3 배열 크기(`N`)에 따른 성능 추이 (`fresh_3d_distances`, 단위: µs)
-
-| 크기&nbsp;`N` | 4B&nbsp;`std::sort` | 4B&nbsp;Idea&nbsp;4 | 4B&nbsp;Idea&nbsp;5 | **4B&nbsp;Idea&nbsp;6** | 8B&nbsp;`std::sort` | 8B&nbsp;Idea&nbsp;4 | 8B&nbsp;Idea&nbsp;5 | **8B&nbsp;Idea&nbsp;6** |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `128` | 2.20 | 1.53 | 0.82 | **0.27** | 2.18 | 1.68 | 1.45 | **0.75** |
-| `2,048` | 51.61 | 29.09 | 16.34 | **7.04** | 52.45 | 35.32 | 36.12 | **19.16** |
-| `8,192` | 240.93 | 131.65 | 74.38 | **33.67** | 241.90 | 161.68 | 168.22 | **97.12** |
-| `131,072` | 5,215.40 | 2,612.20 | 1,534.10 | **865.60** | 4,902.90 | 3,283.30 | 3,578.00 | **2,014.50** |
-| `1,000,000` | 45,543.30 | 22,555.60 | 13,141.40 | **6,764.80** | 43,853.30 | 29,322.30 | 32,542.10 | **18,192.90** |

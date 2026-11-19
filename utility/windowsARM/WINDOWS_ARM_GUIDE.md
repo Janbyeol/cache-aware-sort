@@ -62,7 +62,7 @@ $N \in \{16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000\}$ 전�
 | :--- | :--- |
 | **`Data_Type`** | `4B_Int32` (4바이트 정수) 또는 `8B_Record` (8바이트 Key+ID 레코드) |
 | **`Arch`** | 컴파일된 바이너리 아키텍처 (`ARM64_Oryon` 또는 `x86_64`) |
-| **`Scenario`** | `0_Uniform_Random` ~ `6_Organ_Pipe_Symmetric` (7개 워크로드 시나리오) |
+| **`Scenario`** | `0_Uniform_Random` \~ `6_Organ_Pipe_Symmetric` (7개 워크로드 시나리오) |
 | **`N`** | 정렬 배열 원소 개수 |
 | **`Algorithm`** | 측정 대상 정렬 알고리즘 이름 |
 | **`Runtime_us` / `Runtime_ms`** | 순수 정렬 구간 실행 시간 ($\mu\text{s}$ / $\text{ms}$, `QueryPerformanceCounter` 기준) |

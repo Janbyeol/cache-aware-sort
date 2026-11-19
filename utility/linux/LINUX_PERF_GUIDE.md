@@ -106,7 +106,7 @@ g++ -O3 -std=c++20 -Iinclude -DBENCH_RECORD=1 \
 | :--- | :--- | :--- |
 | **실행 파일** | `./utility/linux/prof_4b` / `./utility/linux/prof_8b` | `prof_4b`: 4B 정수(`int32_t`) / `prof_8b`: 8B 레코드(`Key+ID`) |
 | **`<알고리즘>`** | `std`, `stable`, `idea1`, `idea2`, `idea3`, `idea4`, `idea5` | 측정할 정렬 알고리즘 선택 |
-| **`<시나리오번호>`** | `0` ~ `6` | `0`: 완전 무작위 (`Fresh3DDistances`)<br>`1`: 프레임 미세 흔들림 (`NextFrameMotion`)<br>`2`: 앞 95% 정렬 + 뒤 5% 난수 (`Append5PctNew`)<br>`3`: 거리 버킷 중복 키 (`DistanceBuckets`)<br>`4`: 역순 + 1% 노이즈 (`MostlyDescending`)<br>`5`: 가우시안 정규분포 (`GaussianNormal`)<br>`6`: 오르간 파이프 대칭 (`OrganPipe`) |
+| **`<시나리오번호>`** | `0` \~ `6` | `0`: 완전 무작위 (`Fresh3DDistances`)<br>`1`: 프레임 미세 흔들림 (`NextFrameMotion`)<br>`2`: 앞 95% 정렬 + 뒤 5% 난수 (`Append5PctNew`)<br>`3`: 거리 버킷 중복 키 (`DistanceBuckets`)<br>`4`: 역순 + 1% 노이즈 (`MostlyDescending`)<br>`5`: 가우시안 정규분포 (`GaussianNormal`)<br>`6`: 오르간 파이프 대칭 (`OrganPipe`) |
 | **`<원소개수_N>`** | 예: `2048`, `131072`, `1000000` | 정렬할 배열의 원소 개수 (생략 시 기본값 `1000000`) |
 
 ```bash

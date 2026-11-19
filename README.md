@@ -125,17 +125,45 @@ After finishing Idea 4, a natural follow-up question came up: since each 64-byte
 
 Set `HSORT_SIMD_ISA` before launch to `auto` (default), `scalar`, `sse2`, `avx2`, `avx512f`, or `neon`. Auto currently chooses AVX2 or SSE2 on x64, NEON on supported ARM64 builds, and scalar elsewhere. Select `avx512f` to use the shared 512-bit kernel on AVX-512F and compatible AVX10.2 CPUs. `HSORT_SIMD_STAGE` accepts `leaf`, `merge`, and `both` (default) so the leaf and merge vectorization stages can be isolated independently. The profiler label records the selected kernel, active stages, and detected CPU capability. See the [Windows x64 AVX2 follow-up benchmark](docs/windows-x64/2026-11-19-avx2/README.md) for full comparisons across all eight sorts and stage-by-stage isolation of SIMD leaf vs. SIMD merge.
 
-### Idea 6: Transpose-vectorized quad-leaf & dual-chain branchless SIMD tiled merge
+### Idea 6: Transpose-vectorized quad-leaf & dual-chain branchless SIMD tiled merge (AVX2 & ARM64 NEON)
 
-[`simd_transpose_tiled_merge_sort`](src/idea6_simd_transpose_merge.cpp) (`simd_transpose_merge`) addresses the bottlenecks observed in Idea 5 (cross-lane permute latency, serial loop-carried `carry` dependency, 8B record comparison overhead, and dirtying clean cache lines on pre-sorted blocks) by lifting the core principles of Ideas 1, 3, and 4 directly into SIMD register architecture:
+[`simd_transpose_tiled_merge_sort`](src/idea6_simd_transpose_merge.cpp) (`simd_transpose_merge`) addresses the bottlenecks observed in Idea 5 (cross-lane permute latency, 21-cycle serial loop-carried `carry` dependency floor, LLVM AArch64 `b.ge`/`b.le` De-If-Conversion traps, 128-bit NEON 8B 2-lane AoS overhead, dirtying clean cache lines on pre-sorted blocks, and 8 MB scratch page-fault overhead on mostly-descending inputs) by lifting the core principles of Ideas 1, 3, and 4 directly into **x86-64 AVX2 (256-bit)** and **ARM64 NEON (128-bit)** register architectures:
 
-1. **Vertical Sorting Network + In-Register Matrix Transpose for 256B Quad-Leaves (`4 * LEAF_SIZE`)**: Loads 4 cache lines (8 YMM registers: 64× 4B keys or 32× 8B records), sorts columns vertically with zero shuffles, transposes the register matrix ($8 \times 8$ or $4 \times 4 \times 2$), and finishes merging the 256B quad-leaf in registers—eliminating the first two intra-tile merge passes (`width = LEAF_SIZE, 2 * LEAF_SIZE`) while keeping the remaining 5 intra-tile passes odd.
-2. **1-Cycle In-Lane Immediate Shuffles & Single-Comparison Tie-Safe 8B Kernel**: Replaces 3-cycle cross-lane variable permutes (`vpermd`) with 1-cycle in-lane `_mm256_shuffle_epi32` and immediate blends, and compares 8B records (`{ key, entity_id }`) with a single `_mm256_cmpgt_epi32` per stage while preserving equal-key records. (On ARM64 NEON, it uses hardware `vld2q_s32`/`vst2q_s32` key/ID de-interleaving for 4-lane leaf sorting paired with 64-bit `csel` bidirectional merge.)
-3. **Dual-Chain (`carry_fwd` + `carry_bwd`) Branchless SIMD Bitonic Merge**: Extends Idea 3's bidirectional merge to SIMD bitonic merging by advancing two independent SIMD merge chains from the front and back simultaneously with branchless `cmov` pointer updates.
-4. **Clean Cache-Line Preservation, `O(1)` Outer-Boundary Check & Run-Boundary Short-Circuiting**: Skips memory stores on already-sorted 256B quad-leaves to avoid dirtying cache lines on nearly-sorted inputs, combines Idea 3's `O(1)` outer-boundary check with binary boundary trimming, and short-circuits merge passes when all run boundaries are ordered.
-5. **Stack-Resident L1 Scratch for `N <= TILE_SIZE` (8 KiB) & Single-TU Inlining**: Avoids heap allocation on small/medium arrays and eliminates Windows x64 non-volatile `xmm6`–`xmm15` spill overhead across leaf and merge calls.
+1. **Vertical Sorting Network + In-Register Matrix Transpose for 256B Quad-Leaves (`4 * LEAF_SIZE`)**: Loads 4 cache lines (8 YMM registers on AVX2 / 16 Q registers on ARM64 NEON: 64× 4B keys or 32× 8B records), sorts columns vertically with **zero shuffles**, transposes the register matrix ($8 \times 8$ or $4 \times 4 \times 4$), and finishes merging the 256B quad-leaf in registers—eliminating the first two intra-tile merge passes (`width = LEAF_SIZE, 2 * LEAF_SIZE`) while keeping the remaining 5 intra-tile passes odd.
+2. **ISA-Specific Fast Bitonic Butterflies & ARM64 `vld2q_s32`/`vst2q_s32` Hardware De-Interleaved 4-Record SoA**:
+   - **x86-64 AVX2**: Replaces 3-cycle cross-lane variable permutes (`vpermd`) with 1-cycle in-lane `_mm256_shuffle_epi32` and immediate blends, and compares 8B records (`{ key, entity_id }`) with a single `_mm256_cmpgt_epi32` per stage while preserving equal-key records.
+   - **ARM64 NEON**: Replaces `vtrn1q_s64` (which Clang compiled into extra `mov+ins` instructions) with a symmetric 3-stage `vzip1q_s32`/`vzip2q_s32` butterfly, and uses hardware **`vld2q_s32`/`vst2q_s32` key/ID de-interleaving (AoS → SoA)** so both 256B Quad-Leaves and Dual-Chain merges process **4 records per vector** (amortizing the 6-cycle L1D load-to-address pointer dependency from 6.0 to 1.5 cycles/record).
+3. **Dual-Chain (`carry_fwd` + `carry_bwd`) Branchless SIMD Merge & `__builtin_unpredictable`**: Extends Idea 3's bidirectional merge to SIMD bitonic merging by advancing two independent SIMD merge chains from the front and back simultaneously while moving vector reversal off the loop-carried `carry` path, and enforces hardware `csel`/`cset` via `HSORT_UNPREDICTABLE` (`__builtin_unpredictable`) to block LLVM AArch64 De-If-Conversion.
+4. **Adaptive Distribution Fast-Paths**: Skips memory stores on already-sorted 256B quad-leaves to keep cache lines Clean; detects disjoint reversed runs (`src[end - 1] <= src[begin]`) in `O(1)` (`2.4×` faster on `6_Organ_Pipe`); runs a zero-allocation in-place bounded insertion sort (`try_bounded_inplace_insertion_sort`) after reversing descending inputs to eliminate 2,048 OS soft page faults on `4_Mostly_Descending`; and streams equal-key plateaus (`kl == kr && l_fwd[LANES - 1] == kl`) at L1 copy bandwidth.
+5. **Stack-Resident L1 Scratch for `N <= TILE_SIZE` (8 KiB) & Single-TU Inlining**: Avoids heap allocation on small/medium arrays and eliminates non-volatile SIMD register spill overhead across leaf and merge calls.
 
-#### Idea 6 Head-to-Head Results (`N = 1,000,000`, Windows x64 · Intel Core Ultra 7 270K Plus · `g++ -O3`)
+#### Idea 6 Head-to-Head Results ① — Windows ARM64 (`N = 1,000,000`, Snapdragon X Elite `ARM64_Oryon` · `clang++ 23.1.5 -O3`)
+
+**4-Byte Integer Keys (`4B_Int32`, median time in ms / hardware thread cycles in M)**
+
+| Workload | `std::sort` | `std::stable_sort` | Idea&nbsp;4 (Scalar) | Idea&nbsp;5 (NEON) | Idea&nbsp;6 (**Before**) | **Idea&nbsp;6 (After)** | vs.&nbsp;`std::sort` | vs.&nbsp;Before |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
+| Random&nbsp;3D&nbsp;distances | 18.86 (55.5M) | 13.55 (39.9M) | 62.50 (184.5M) | 28.82 (84.7M) | 66.54 (185.4M) | **9.40 (27.7M)** | **2.01×** | **7.08×** |
+| Frame&nbsp;jitter | 16.30 (48.0M) | 11.94 (35.3M) | 30.91 (91.1M) | 15.96 (47.3M) | 31.22 (91.4M) | **6.21 (18.5M)** | **2.62×** | **5.03×** |
+| Append&nbsp;5%&nbsp;tail | 16.46 (48.4M) | 8.18 (24.2M) | 5.90 (17.4M) | 5.74 (16.8M) | 6.49 (17.5M) | **3.24 (9.6M)** | **5.07×** | **2.00×** |
+| Distance&nbsp;buckets | 6.89 (20.2M) | 14.35 (42.3M) | 37.35 (110.0M) | 28.80 (84.8M) | 37.57 (110.7M) | **8.50 (24.7M)** | 0.81× *(1.69× vs stable)* | **4.42×** |
+| Mostly&nbsp;descending | 4.72 (13.9M) | 11.55 (34.0M) | 3.33 (9.5M) | 3.55 (10.4M) | 2.78 (8.1M) | **0.78 (2.3M)** | **6.03×** | **3.55×** |
+| Gaussian-like | 14.99 (44.2M) | 16.95 (50.1M) | 57.92 (170.8M) | 28.60 (84.5M) | 58.12 (170.7M) | **9.74 (28.8M)** | **1.54×** | **5.96×** |
+| Organ&nbsp;pipe | 36.58 (108.0M) | 10.88 (32.0M) | 7.53 (22.2M) | 9.67 (28.5M) | 7.57 (22.2M) | **2.86 (8.4M)** | **12.77×** | **2.64×** |
+
+**8-Byte Key + Entity ID Records (`8B_Record`, median time in ms / hardware thread cycles in M)**
+
+| Workload | `std::sort` | `std::stable_sort` | Idea&nbsp;4 (Scalar) | Idea&nbsp;5 (NEON) | Idea&nbsp;6 (**Before**) | **Idea&nbsp;6 (After)** | vs.&nbsp;`std::sort` | vs.&nbsp;Before |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
+| Random&nbsp;3D&nbsp;distances | 51.36 (150.8M) | 44.03 (129.7M) | 68.43 (201.9M) | 51.21 (151.0M) | 69.52 (204.6M) | **18.18 (54.0M)** | **2.83×** | **3.82×** |
+| Frame&nbsp;jitter | 28.81 (85.3M) | 34.92 (103.1M) | 37.44 (110.3M) | 28.85 (85.5M) | 37.99 (111.7M) | **13.51 (39.7M)** | **2.13×** | **2.81×** |
+| Append&nbsp;5%&nbsp;tail | 18.10 (53.4M) | 19.88 (58.5M) | 9.08 (26.5M) | 10.89 (32.0M) | 9.66 (28.4M) | **6.30 (18.7M)** | **2.87×** | **1.53×** |
+| Distance&nbsp;buckets | 20.80 (61.5M) | 43.99 (129.7M) | 42.74 (126.4M) | 50.77 (150.0M) | 44.51 (131.0M) | **15.47 (45.6M)** | **1.35×** | **2.88×** |
+| Mostly&nbsp;descending | 3.86 (11.5M) | 30.60 (90.8M) | 5.79 (17.1M) | 5.98 (17.7M) | 6.17 (18.2M) | **0.86 (2.6M)** | **4.48×** | **7.15×** |
+| Gaussian-like | 44.63 (131.7M) | 43.88 (129.5M) | 63.59 (187.9M) | 50.85 (150.0M) | 64.22 (189.2M) | **18.95 (55.7M)** | **2.36×** | **3.39×** |
+| Organ&nbsp;pipe | 38.99 (115.3M) | 25.91 (76.6M) | 11.07 (32.7M) | 18.40 (54.4M) | 11.55 (34.0M) | **6.10 (18.0M)** | **6.39×** | **1.89×** |
+
+#### Idea 6 Head-to-Head Results ② — Windows x64 (`N = 1,000,000`, Intel Core Ultra 7 270K Plus · `g++ -O3`)
 
 **4-Byte Integer Keys (`key_only_4b`, median time in ms)**
 
@@ -161,7 +189,7 @@ Set `HSORT_SIMD_ISA` before launch to `auto` (default), `scalar`, `sse2`, `avx2`
 | Gaussian-like | 39.14 | 32.21 | 29.85 | 33.04 | **18.75** | **2.09×** | **1.59×** | **1.76×** |
 | Organ&nbsp;pipe | 40.33 | 12.45 | 13.07 | 13.67 | **10.75** | **3.75×** | **1.22×** | **1.27×** |
 
-See the **[Idea 6 Design and Benchmark Guide](docs/idea6-simd-transpose/README.md)** for full architectural diagrams, microarchitectural analysis, and multi-scale (`N = 128 .. 1,000,000`) benchmark tables.
+See the **[Idea 6 Design and Benchmark Guide](docs/idea6-simd-transpose/README.md)** for full architectural diagrams, ARM64 NEON assembly analysis, iterative trial-and-error log (`v1`–`v4`), and multi-scale benchmark tables.
 
 ## Workloads
 
@@ -211,7 +239,7 @@ For the random 3D-distance workload above:
 
 The merge variants have fewer recorded cycles, higher IPC, and better branch prediction hit rates here, but **more L1D read misses and lower L1D read hit rates**. These observations do not establish improved cache behavior as the cause of the cycle reduction. Hit rates also have different access-count denominators, so compare absolute counts as well as percentages.
 
-The ten committed CSVs cover both formats at `N = 16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000`. Evaluate 8-byte records and other sizes separately: for example, the 8-byte ping-pong variant uses about 16.3% more cycles than `std::sort` on the one-million-item mostly descending workload, unlike the 4-byte result above. [`docs/windowsARM/`](docs/windowsARM/) currently contains a placeholder, not published measurements.
+The ten committed CSVs cover both formats at `N = 16, 64, 256, 1024, 2048, 8192, 32768, 262144, 1000000, 5000000`. Evaluate 8-byte records and other sizes separately: for example, the 8-byte ping-pong variant uses about 16.3% more cycles than `std::sort` on the one-million-item mostly descending workload, unlike the 4-byte result above. [`docs/windowsARM/`](docs/windowsARM/) contains native Windows ARM64 (`Snapdragon X Elite / Oryon`) `N = 1,000,000` runtime and thread-cycle measurements.
 
 ## Benchmark methodology and reproduction
 
@@ -281,7 +309,7 @@ My takeaway is that boundary trimming is worth exploring when much of the input 
 | [`utility/linux/`](utility/linux/) | Linux PMU profiler and external `perf stat` wrapper |
 | [`utility/windowsARM/`](utility/windowsARM/) | Windows timing/thread-cycle profiler and build scripts |
 | [`docs/linux/`](docs/linux/) | Committed Linux counter CSVs and plots |
-| [`docs/windowsARM/`](docs/windowsARM/) | Placeholder for Windows ARM64 results |
+| [`docs/windowsARM/`](docs/windowsARM/) | Windows ARM64 (Snapdragon X Elite / Oryon) `N = 1,000,000` CSV and Markdown report |
 
 ## Feedback and contributions
 

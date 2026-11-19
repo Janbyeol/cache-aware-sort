@@ -145,53 +145,113 @@ Idea 4의 64바이트 리프와 8 KiB 타일 핑퐁 병합까지 구현하고 �
 
 **4바이트 정수 키 (`4B_Int32`, 중앙값 단위: ms / 하드웨어 스레드 사이클: M cycles)**
 
-| 워크로드 | `std::sort` | `std::stable_sort` | Idea&nbsp;4 (Scalar) | Idea&nbsp;5 (NEON) | Idea&nbsp;6 (**Before**) | **Idea&nbsp;6 (After)** | `std::sort`&nbsp;대비 | Before&nbsp;대비 |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
-| 무작위&nbsp;3D&nbsp;거리 | 18.86 (55.5M) | 13.55 (39.9M) | 62.50 (184.5M) | 28.82 (84.7M) | 66.54 (185.4M) | **9.40 (27.7M)** | **2.01×** | **7.08×** |
-| 프레임&nbsp;흔들림 | 16.30 (48.0M) | 11.94 (35.3M) | 30.91 (91.1M) | 15.96 (47.3M) | 31.22 (91.4M) | **6.21 (18.5M)** | **2.62×** | **5.03×** |
-| 뒤에&nbsp;5%&nbsp;추가 | 16.46 (48.4M) | 8.18 (24.2M) | 5.90 (17.4M) | 5.74 (16.8M) | 6.49 (17.5M) | **3.24 (9.6M)** | **5.07×** | **2.00×** |
-| 거리&nbsp;버킷 | 6.89 (20.2M) | 14.35 (42.3M) | 37.35 (110.0M) | 28.80 (84.8M) | 37.57 (110.7M) | **8.50 (24.7M)** | 0.81× *(stable 대비 1.69×)* | **4.42×** |
-| 대부분&nbsp;내림차순 | 4.72 (13.9M) | 11.55 (34.0M) | 3.33 (9.5M) | 3.55 (10.4M) | 2.78 (8.1M) | **0.78 (2.3M)** | **6.03×** | **3.55×** |
-| 가우시안&nbsp;유사 | 14.99 (44.2M) | 16.95 (50.1M) | 57.92 (170.8M) | 28.60 (84.5M) | 58.12 (170.7M) | **9.74 (28.8M)** | **1.54×** | **5.96×** |
-| 오르간&nbsp;파이프 | 36.58 (108.0M) | 10.88 (32.0M) | 7.53 (22.2M) | 9.67 (28.5M) | 7.57 (22.2M) | **2.86 (8.4M)** | **12.77×** | **2.64×** |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right" nowrap><code>std::sort</code></th>
+      <th scope="col" align="right" nowrap><code>std::stable_sort</code></th>
+      <th scope="col" align="right" nowrap>Idea 4<br>(Scalar)</th>
+      <th scope="col" align="right" nowrap>Idea 5<br>(NEON)</th>
+      <th scope="col" align="right" nowrap>Idea 6<br>(<strong>Before</strong>)</th>
+      <th scope="col" align="right" nowrap><strong>Idea 6<br>(After)</strong></th>
+      <th scope="col" align="center" nowrap><code>std::sort</code><br>대비</th>
+      <th scope="col" align="center" nowrap>Before<br>대비</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>18.86 (55.5M)</td><td>13.55 (39.9M)</td><td>62.50 (184.5M)</td><td>28.82 (84.7M)</td><td>66.54 (185.4M)</td><td><strong>9.40 (27.7M)</strong></td><td align="center"><strong>2.01×</strong></td><td align="center"><strong>7.08×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>16.30 (48.0M)</td><td>11.94 (35.3M)</td><td>30.91 (91.1M)</td><td>15.96 (47.3M)</td><td>31.22 (91.4M)</td><td><strong>6.21 (18.5M)</strong></td><td align="center"><strong>2.62×</strong></td><td align="center"><strong>5.03×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>16.46 (48.4M)</td><td>8.18 (24.2M)</td><td>5.90 (17.4M)</td><td>5.74 (16.8M)</td><td>6.49 (17.5M)</td><td><strong>3.24 (9.6M)</strong></td><td align="center"><strong>5.07×</strong></td><td align="center"><strong>2.00×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>6.89 (20.2M)</td><td>14.35 (42.3M)</td><td>37.35 (110.0M)</td><td>28.80 (84.8M)</td><td>37.57 (110.7M)</td><td><strong>8.50 (24.7M)</strong></td><td align="center" nowrap>0.81×<br><em>(stable 대비 1.69×)</em></td><td align="center"><strong>4.42×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>4.72 (13.9M)</td><td>11.55 (34.0M)</td><td>3.33 (9.5M)</td><td>3.55 (10.4M)</td><td>2.78 (8.1M)</td><td><strong>0.78 (2.3M)</strong></td><td align="center"><strong>6.03×</strong></td><td align="center"><strong>3.55×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>14.99 (44.2M)</td><td>16.95 (50.1M)</td><td>57.92 (170.8M)</td><td>28.60 (84.5M)</td><td>58.12 (170.7M)</td><td><strong>9.74 (28.8M)</strong></td><td align="center"><strong>1.54×</strong></td><td align="center"><strong>5.96×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>36.58 (108.0M)</td><td>10.88 (32.0M)</td><td>7.53 (22.2M)</td><td>9.67 (28.5M)</td><td>7.57 (22.2M)</td><td><strong>2.86 (8.4M)</strong></td><td align="center"><strong>12.77×</strong></td><td align="center"><strong>2.64×</strong></td></tr>
+  </tbody>
+</table>
 
 **8바이트 키 + 엔티티 ID 레코드 (`8B_Record`, 중앙값 단위: ms / 하드웨어 스레드 사이클: M cycles)**
 
-| 워크로드 | `std::sort` | `std::stable_sort` | Idea&nbsp;4 (Scalar) | Idea&nbsp;5 (NEON) | Idea&nbsp;6 (**Before**) | **Idea&nbsp;6 (After)** | `std::sort`&nbsp;대비 | Before&nbsp;대비 |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
-| 무작위&nbsp;3D&nbsp;거리 | 51.36 (150.8M) | 44.03 (129.7M) | 68.43 (201.9M) | 51.21 (151.0M) | 69.52 (204.6M) | **18.18 (54.0M)** | **2.83×** | **3.82×** |
-| 프레임&nbsp;흔들림 | 28.81 (85.3M) | 34.92 (103.1M) | 37.44 (110.3M) | 28.85 (85.5M) | 37.99 (111.7M) | **13.51 (39.7M)** | **2.13×** | **2.81×** |
-| 뒤에&nbsp;5%&nbsp;추가 | 18.10 (53.4M) | 19.88 (58.5M) | 9.08 (26.5M) | 10.89 (32.0M) | 9.66 (28.4M) | **6.30 (18.7M)** | **2.87×** | **1.53×** |
-| 거리&nbsp;버킷 | 20.80 (61.5M) | 43.99 (129.7M) | 42.74 (126.4M) | 50.77 (150.0M) | 44.51 (131.0M) | **15.47 (45.6M)** | **1.35×** | **2.88×** |
-| 대부분&nbsp;내림차순 | 3.86 (11.5M) | 30.60 (90.8M) | 5.79 (17.1M) | 5.98 (17.7M) | 6.17 (18.2M) | **0.86 (2.6M)** | **4.48×** | **7.15×** |
-| 가우시안&nbsp;유사 | 44.63 (131.7M) | 43.88 (129.5M) | 63.59 (187.9M) | 50.85 (150.0M) | 64.22 (189.2M) | **18.95 (55.7M)** | **2.36×** | **3.39×** |
-| 오르간&nbsp;파이프 | 38.99 (115.3M) | 25.91 (76.6M) | 11.07 (32.7M) | 18.40 (54.4M) | 11.55 (34.0M) | **6.10 (18.0M)** | **6.39×** | **1.89×** |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right" nowrap><code>std::sort</code></th>
+      <th scope="col" align="right" nowrap><code>std::stable_sort</code></th>
+      <th scope="col" align="right" nowrap>Idea 4<br>(Scalar)</th>
+      <th scope="col" align="right" nowrap>Idea 5<br>(NEON)</th>
+      <th scope="col" align="right" nowrap>Idea 6<br>(<strong>Before</strong>)</th>
+      <th scope="col" align="right" nowrap><strong>Idea 6<br>(After)</strong></th>
+      <th scope="col" align="center" nowrap><code>std::sort</code><br>대비</th>
+      <th scope="col" align="center" nowrap>Before<br>대비</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>51.36 (150.8M)</td><td>44.03 (129.7M)</td><td>68.43 (201.9M)</td><td>51.21 (151.0M)</td><td>69.52 (204.6M)</td><td><strong>18.18 (54.0M)</strong></td><td align="center"><strong>2.83×</strong></td><td align="center"><strong>3.82×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>28.81 (85.3M)</td><td>34.92 (103.1M)</td><td>37.44 (110.3M)</td><td>28.85 (85.5M)</td><td>37.99 (111.7M)</td><td><strong>13.51 (39.7M)</strong></td><td align="center"><strong>2.13×</strong></td><td align="center"><strong>2.81×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>18.10 (53.4M)</td><td>19.88 (58.5M)</td><td>9.08 (26.5M)</td><td>10.89 (32.0M)</td><td>9.66 (28.4M)</td><td><strong>6.30 (18.7M)</strong></td><td align="center"><strong>2.87×</strong></td><td align="center"><strong>1.53×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>20.80 (61.5M)</td><td>43.99 (129.7M)</td><td>42.74 (126.4M)</td><td>50.77 (150.0M)</td><td>44.51 (131.0M)</td><td><strong>15.47 (45.6M)</strong></td><td align="center"><strong>1.35×</strong></td><td align="center"><strong>2.88×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>3.86 (11.5M)</td><td>30.60 (90.8M)</td><td>5.79 (17.1M)</td><td>5.98 (17.7M)</td><td>6.17 (18.2M)</td><td><strong>0.86 (2.6M)</strong></td><td align="center"><strong>4.48×</strong></td><td align="center"><strong>7.15×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>44.63 (131.7M)</td><td>43.88 (129.5M)</td><td>63.59 (187.9M)</td><td>50.85 (150.0M)</td><td>64.22 (189.2M)</td><td><strong>18.95 (55.7M)</strong></td><td align="center"><strong>2.36×</strong></td><td align="center"><strong>3.39×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>38.99 (115.3M)</td><td>25.91 (76.6M)</td><td>11.07 (32.7M)</td><td>18.40 (54.4M)</td><td>11.55 (34.0M)</td><td><strong>6.10 (18.0M)</strong></td><td align="center"><strong>6.39×</strong></td><td align="center"><strong>1.89×</strong></td></tr>
+  </tbody>
+</table>
 
 #### Idea 6 정면 비교 결과 ② — Windows x64 (`N = 1,000,000`, Intel Core Ultra 7 270K Plus · `g++ -O3`)
 
 **4바이트 정수 키 (`key_only_4b`, 단위: ms)**
 
-| 워크로드 | `std::sort` | Idea&nbsp;3 | Idea&nbsp;4 | Idea&nbsp;5 | **Idea&nbsp;6** | `std::sort`&nbsp;대비 | Idea&nbsp;4&nbsp;대비 | Idea&nbsp;5&nbsp;대비 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 무작위&nbsp;3D&nbsp;거리 | 45.54 | 24.51 | 22.56 | 13.14 | **6.76** | **6.73×** | **3.33×** | **1.94×** |
-| 프레임&nbsp;흔들림 | 26.24 | 15.62 | 16.64 | 10.32 | **5.90** | **4.45×** | **2.82×** | **1.75×** |
-| 뒤에&nbsp;5%&nbsp;추가 | 17.50 | 3.76 | 4.57 | 3.63 | **3.06** | **5.71×** | **1.49×** | **1.19×** |
-| 거리&nbsp;버킷 | 22.88 | 24.42 | 22.27 | 13.10 | **6.55** | **3.49×** | **3.40×** | **2.00×** |
-| 대부분&nbsp;내림차순 | 3.30 | 19.30 | 2.98 | 2.82 | **2.23** | **1.48×** | **1.34×** | **1.27×** |
-| 가우시안&nbsp;유사 | 40.68 | 24.29 | 22.79 | 13.33 | **6.98** | **5.83×** | **3.27×** | **1.91×** |
-| 오르간&nbsp;파이프 | 39.97 | 11.37 | 9.24 | 4.48 | **3.86** | **10.34×** | **2.39×** | **1.16×** |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right" nowrap><code>std::sort</code></th>
+      <th scope="col" align="right" nowrap>Idea 3</th>
+      <th scope="col" align="right" nowrap>Idea 4</th>
+      <th scope="col" align="right" nowrap>Idea 5</th>
+      <th scope="col" align="right" nowrap><strong>Idea 6</strong></th>
+      <th scope="col" align="right" nowrap><code>std::sort</code><br>대비</th>
+      <th scope="col" align="right" nowrap>Idea 4<br>대비</th>
+      <th scope="col" align="right" nowrap>Idea 5<br>대비</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>45.54</td><td>24.51</td><td>22.56</td><td>13.14</td><td><strong>6.76</strong></td><td><strong>6.73×</strong></td><td align="center"><strong>3.33×</strong></td><td align="center"><strong>1.94×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>26.24</td><td>15.62</td><td>16.64</td><td>10.32</td><td><strong>5.90</strong></td><td><strong>4.45×</strong></td><td align="center"><strong>2.82×</strong></td><td align="center"><strong>1.75×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>17.50</td><td>3.76</td><td>4.57</td><td>3.63</td><td><strong>3.06</strong></td><td><strong>5.71×</strong></td><td align="center"><strong>1.49×</strong></td><td align="center"><strong>1.19×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>22.88</td><td>24.42</td><td>22.27</td><td>13.10</td><td><strong>6.55</strong></td><td><strong>3.49×</strong></td><td align="center"><strong>3.40×</strong></td><td align="center"><strong>2.00×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>3.30</td><td>19.30</td><td>2.98</td><td>2.82</td><td><strong>2.23</strong></td><td><strong>1.48×</strong></td><td align="center"><strong>1.34×</strong></td><td align="center"><strong>1.27×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>40.68</td><td>24.29</td><td>22.79</td><td>13.33</td><td><strong>6.98</strong></td><td><strong>5.83×</strong></td><td align="center"><strong>3.27×</strong></td><td align="center"><strong>1.91×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>39.97</td><td>11.37</td><td>9.24</td><td>4.48</td><td><strong>3.86</strong></td><td><strong>10.34×</strong></td><td align="center"><strong>2.39×</strong></td><td align="center"><strong>1.16×</strong></td></tr>
+  </tbody>
+</table>
 
 **8바이트 키 + 엔티티 ID 레코드 (`key_id_8b`, 단위: ms)**
 
-| 워크로드 | `std::sort` | Idea&nbsp;3 | Idea&nbsp;4 | Idea&nbsp;5 | **Idea&nbsp;6** | `std::sort`&nbsp;대비 | Idea&nbsp;4&nbsp;대비 | Idea&nbsp;5&nbsp;대비 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 무작위&nbsp;3D&nbsp;거리 | 43.85 | 32.25 | 29.32 | 32.54 | **18.19** | **2.41×** | **1.61×** | **1.79×** |
-| 프레임&nbsp;흔들림 | 25.90 | 19.05 | 21.99 | 21.62 | **14.00** | **1.85×** | **1.57×** | **1.54×** |
-| 뒤에&nbsp;5%&nbsp;추가 | 17.46 | 4.74 | 8.33 | 9.18 | **6.56** | **2.66×** | **1.27×** | **1.40×** |
-| 거리&nbsp;버킷 | 22.70 | 32.63 | 29.56 | 33.21 | **18.30** | **1.24×** | **1.62×** | **1.81×** |
-| 대부분&nbsp;내림차순 | 4.33 | 22.67 | 6.01 | 6.82 | **4.47** | **0.97×** | **1.34×** | **1.53×** |
-| 가우시안&nbsp;유사 | 39.14 | 32.21 | 29.85 | 33.04 | **18.75** | **2.09×** | **1.59×** | **1.76×** |
-| 오르간&nbsp;파이프 | 40.33 | 12.45 | 13.07 | 13.67 | **10.75** | **3.75×** | **1.22×** | **1.27×** |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right" nowrap><code>std::sort</code></th>
+      <th scope="col" align="right" nowrap>Idea 3</th>
+      <th scope="col" align="right" nowrap>Idea 4</th>
+      <th scope="col" align="right" nowrap>Idea 5</th>
+      <th scope="col" align="right" nowrap><strong>Idea 6</strong></th>
+      <th scope="col" align="right" nowrap><code>std::sort</code><br>대비</th>
+      <th scope="col" align="right" nowrap>Idea 4<br>대비</th>
+      <th scope="col" align="right" nowrap>Idea 5<br>대비</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>43.85</td><td>32.25</td><td>29.32</td><td>32.54</td><td><strong>18.19</strong></td><td><strong>2.41×</strong></td><td align="center"><strong>1.61×</strong></td><td align="center"><strong>1.79×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>25.90</td><td>19.05</td><td>21.99</td><td>21.62</td><td><strong>14.00</strong></td><td><strong>1.85×</strong></td><td align="center"><strong>1.57×</strong></td><td align="center"><strong>1.54×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>17.46</td><td>4.74</td><td>8.33</td><td>9.18</td><td><strong>6.56</strong></td><td><strong>2.66×</strong></td><td align="center"><strong>1.27×</strong></td><td align="center"><strong>1.40×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>22.70</td><td>32.63</td><td>29.56</td><td>33.21</td><td><strong>18.30</strong></td><td><strong>1.24×</strong></td><td align="center"><strong>1.62×</strong></td><td align="center"><strong>1.81×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>4.33</td><td>22.67</td><td>6.01</td><td>6.82</td><td><strong>4.47</strong></td><td><strong>0.97×</strong></td><td align="center"><strong>1.34×</strong></td><td align="center"><strong>1.53×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>39.14</td><td>32.21</td><td>29.85</td><td>33.04</td><td><strong>18.75</strong></td><td><strong>2.09×</strong></td><td align="center"><strong>1.59×</strong></td><td align="center"><strong>1.76×</strong></td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>40.33</td><td>12.45</td><td>13.07</td><td>13.67</td><td><strong>10.75</strong></td><td><strong>3.75×</strong></td><td align="center"><strong>1.22×</strong></td><td align="center"><strong>1.27×</strong></td></tr>
+  </tbody>
+</table>
 
 어셈블리 수준 병목 원인 분석, ARM64 NEON 시행착오(v1\~v4) 기록, 그리고 크기별(`N = 128 ~ 1,000,000`) 전체 벤치마크 분석은 **[Idea 6 상세 설계 및 벤치마크 문서](docs/idea6-simd-transpose/README.ko.md)** 에서 확인할 수 있습니다.
 
@@ -199,15 +259,24 @@ Idea 4의 64바이트 리프와 8 KiB 타일 핑퐁 병합까지 구현하고 �
 
 모든 입력은 [`generate_game_workload`](src/benchmark_api.cpp)로 생성합니다. 실제 게임 엔진에서 수집한 데이터가 아니라 합성 워크로드입니다.
 
-| ID | 워크로드 | 생성 방식 |
-| --- | --- | --- |
-| 0 | 무작위 3D 거리 | 의사 난수 3D 좌표에서 거리의 제곱을 계산합니다. 프로파일러의 기존 이름은 `0_Uniform_Random`이지만, **계산된 거리 키는 균등분포가 아닙니다**. |
-| 1 | 프레임 흔들림 | 점들을 거리순으로 정렬한 뒤 좌표를 조금 움직이고 거리 키를 다시 계산합니다. |
-| 2 | 뒤에 5% 추가 | 정렬된 앞부분 뒤에 `floor(N / 20)`개의 정렬되지 않은 새 키를 둡니다. |
-| 3 | 거리 버킷 | 거리 키를 1,000,000으로 나누어 약 300개 버킷과 다수의 중복 키를 만듭니다. |
-| 4 | 대부분 내림차순 | 내림차순 키에 약 1%의 무작위 인접 교환을 적용합니다. |
-| 5 | 가우시안 유사 | 의사 난수 정수 네 개를 더해 종 모양 분포를 만듭니다. 정확한 정규분포는 아닙니다. |
-| 6 | 오르간 파이프 | 정렬된 키를 앞에서는 증가하고 뒤에서는 감소하는 산 모양으로 배치합니다. |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left">ID</th>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="left" nowrap>생성 방식</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>0</td><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>의사 난수 3D 좌표에서 거리의 제곱을 계산합니다. 프로파일러의 기존 이름은 <code>0_Uniform_Random</code>이지만, <strong>계산된 거리 키는 균등분포가 아닙니다</strong>.</td></tr>
+    <tr><td>1</td><th scope="row" align="left" nowrap>프레임 흔들림</th><td>점들을 거리순으로 정렬한 뒤 좌표를 조금 움직이고 거리 키를 다시 계산합니다.</td></tr>
+    <tr><td>2</td><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>정렬된 앞부분 뒤에 <code>floor(N / 20)</code>개의 정렬되지 않은 새 키를 둡니다.</td></tr>
+    <tr><td>3</td><th scope="row" align="left" nowrap>거리 버킷</th><td>거리 키를 1,000,000으로 나누어 약 300개 버킷과 다수의 중복 키를 만듭니다.</td></tr>
+    <tr><td>4</td><th scope="row" align="left" nowrap>대부분 내림차순</th><td>내림차순 키에 약 1%의 무작위 인접 교환을 적용합니다.</td></tr>
+    <tr><td>5</td><th scope="row" align="left" nowrap>가우시안 유사</th><td>의사 난수 정수 네 개를 더해 종 모양 분포를 만듭니다. 정확한 정규분포는 아닙니다.</td></tr>
+    <tr><td>6</td><th scope="row" align="left" nowrap>오르간 파이프</th><td>정렬된 키를 앞에서는 증가하고 뒤에서는 감소하는 산 모양으로 배치합니다.</td></tr>
+  </tbody>
+</table>
 
 ## 저장된 실험 결과
 
@@ -217,27 +286,47 @@ Idea 4의 64바이트 리프와 8 KiB 타일 핑퐁 병합까지 구현하고 �
 
 **4바이트 정수 키**
 
-| 워크로드 | Linux x86-64 · AVX2 | Windows x64 · AVX2 | Windows ARM64 · NEON |
-| --- | ---: | ---: | ---: |
-| 무작위 3D 거리 | 17.68 → 10.46 (1.69×) | 13.14 → 6.76 (1.94×) | 28.82 → 9.40 (3.07×) |
-| 프레임 흔들림 | 13.09 → 7.91 (1.65×) | 10.32 → 5.90 (1.75×) | 15.96 → 6.21 (2.57×) |
-| 뒤에 5% 추가 | 4.57 → 2.94 (1.55×) | 3.63 → 3.06 (1.19×) | 5.74 → 3.24 (1.77×) |
-| 거리 버킷 | 17.66 → 9.04 (1.95×) | 13.10 → 6.55 (2.00×) | 28.80 → 8.50 (3.39×) |
-| 대부분 내림차순 | 3.32 → 0.76 (4.40×) | 2.82 → 2.23 (1.27×) | 3.55 → 0.78 (4.54×) |
-| 가우시안 유사 | 17.61 → 10.76 (1.64×) | 13.33 → 6.98 (1.91×) | 28.60 → 9.74 (2.94×) |
-| 오르간 파이프 | 6.02 → 2.97 (2.03×) | 4.48 → 3.86 (1.16×) | 9.67 → 2.86 (3.37×) |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right" nowrap>Linux x86-64<br>AVX2</th>
+      <th scope="col" align="right" nowrap>Windows x64<br>AVX2</th>
+      <th scope="col" align="right" nowrap>Windows ARM64<br>NEON</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>17.68&nbsp;→&nbsp;10.46 (1.69×)</td><td>13.14&nbsp;→&nbsp;6.76 (1.94×)</td><td>28.82&nbsp;→&nbsp;9.40 (3.07×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>13.09&nbsp;→&nbsp;7.91 (1.65×)</td><td>10.32&nbsp;→&nbsp;5.90 (1.75×)</td><td>15.96&nbsp;→&nbsp;6.21 (2.57×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>4.57&nbsp;→&nbsp;2.94 (1.55×)</td><td>3.63&nbsp;→&nbsp;3.06 (1.19×)</td><td>5.74&nbsp;→&nbsp;3.24 (1.77×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>17.66&nbsp;→&nbsp;9.04 (1.95×)</td><td>13.10&nbsp;→&nbsp;6.55 (2.00×)</td><td>28.80&nbsp;→&nbsp;8.50 (3.39×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>3.32&nbsp;→&nbsp;0.76 (4.40×)</td><td>2.82&nbsp;→&nbsp;2.23 (1.27×)</td><td>3.55&nbsp;→&nbsp;0.78 (4.54×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>17.61&nbsp;→&nbsp;10.76 (1.64×)</td><td>13.33&nbsp;→&nbsp;6.98 (1.91×)</td><td>28.60&nbsp;→&nbsp;9.74 (2.94×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>6.02&nbsp;→&nbsp;2.97 (2.03×)</td><td>4.48&nbsp;→&nbsp;3.86 (1.16×)</td><td>9.67&nbsp;→&nbsp;2.86 (3.37×)</td></tr>
+  </tbody>
+</table>
 
 **8바이트 키 + 엔티티 ID 레코드**
 
-| 워크로드 | Linux x86-64 · AVX2 | Windows x64 · AVX2 | Windows ARM64 · NEON |
-| --- | ---: | ---: | ---: |
-| 무작위 3D 거리 | 42.55 → 28.32 (1.50×) | 32.54 → 18.19 (1.79×) | 51.21 → 18.18 (2.82×) |
-| 프레임 흔들림 | 31.65 → 22.90 (1.38×) | 21.62 → 14.00 (1.54×) | 28.85 → 13.51 (2.14×) |
-| 뒤에 5% 추가 | 13.54 → 9.45 (1.43×) | 9.18 → 6.56 (1.40×) | 10.89 → 6.30 (1.73×) |
-| 거리 버킷 | 43.22 → 24.09 (1.79×) | 33.21 → 18.30 (1.81×) | 50.77 → 15.47 (3.28×) |
-| 대부분 내림차순 | 10.31 → 1.30 (7.95×) | 6.82 → 4.47 (1.53×) | 5.98 → 0.86 (6.93×) |
-| 가우시안 유사 | 43.46 → 29.63 (1.47×) | 33.04 → 18.75 (1.76×) | 50.85 → 18.95 (2.68×) |
-| 오르간 파이프 | 18.20 → 10.50 (1.73×) | 13.67 → 10.75 (1.27×) | 18.40 → 6.10 (3.02×) |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right" nowrap>Linux x86-64<br>AVX2</th>
+      <th scope="col" align="right" nowrap>Windows x64<br>AVX2</th>
+      <th scope="col" align="right" nowrap>Windows ARM64<br>NEON</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>42.55&nbsp;→&nbsp;28.32 (1.50×)</td><td>32.54&nbsp;→&nbsp;18.19 (1.79×)</td><td>51.21&nbsp;→&nbsp;18.18 (2.82×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>31.65&nbsp;→&nbsp;22.90 (1.38×)</td><td>21.62&nbsp;→&nbsp;14.00 (1.54×)</td><td>28.85&nbsp;→&nbsp;13.51 (2.14×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>13.54&nbsp;→&nbsp;9.45 (1.43×)</td><td>9.18&nbsp;→&nbsp;6.56 (1.40×)</td><td>10.89&nbsp;→&nbsp;6.30 (1.73×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>43.22&nbsp;→&nbsp;24.09 (1.79×)</td><td>33.21&nbsp;→&nbsp;18.30 (1.81×)</td><td>50.77&nbsp;→&nbsp;15.47 (3.28×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>10.31&nbsp;→&nbsp;1.30 (7.95×)</td><td>6.82&nbsp;→&nbsp;4.47 (1.53×)</td><td>5.98&nbsp;→&nbsp;0.86 (6.93×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>43.46&nbsp;→&nbsp;29.63 (1.47×)</td><td>33.04&nbsp;→&nbsp;18.75 (1.76×)</td><td>50.85&nbsp;→&nbsp;18.95 (2.68×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>18.20&nbsp;→&nbsp;10.50 (1.73×)</td><td>13.67&nbsp;→&nbsp;10.75 (1.27×)</td><td>18.40&nbsp;→&nbsp;6.10 (3.02×)</td></tr>
+  </tbody>
+</table>
 
 - **Linux x86-64 AVX2**는 Intel Core i5-1135G7에서 GCC 15.2.0 `-O3`로 측정했습니다. [4B CSV](docs/linux/2026-11-19-x86-64-f62247d/key_only_4b_summary.csv) · [8B CSV](docs/linux/2026-11-19-x86-64-f62247d/key_id_8b_summary.csv)
 - **Windows x64 AVX2**는 Intel Core Ultra 7 270K Plus에서 `g++ -O3`로 측정했습니다. 별도의 MSVC 실험은 Idea 6 추가 전에 Idea 5와 기존 일곱 정렬을 비교했습니다. [4B CSV](docs/idea6-simd-transpose/key_only_4b_summary.csv) · [8B CSV](docs/idea6-simd-transpose/key_id_8b_summary.csv) · [MSVC 측정 보고서](docs/windows-x64/2026-11-19-avx2/README.md)
@@ -253,15 +342,26 @@ Idea 4의 64바이트 리프와 8 KiB 타일 핑퐁 병합까지 구현하고 �
 
 `M`은 백만 사이클입니다. 괄호 안은 `std::sort 사이클 / 해당 알고리즘 사이클`입니다. 1보다 크면 `std::sort`보다 기록된 사이클이 적다는 뜻이며, **실제 경과 시간도 같은 비율로 빨라졌다는 뜻은 아닙니다**.
 
-| 워크로드 | `std::sort` | `std::stable_sort` | 경계 축소 병합 | 타일 핑퐁 병합 |
-| --- | ---: | ---: | ---: | ---: |
-| 무작위 3D 거리 | 230.79M | 278.63M | 142.74M (1.62×) | 139.40M (1.66×) |
-| 프레임 흔들림 | 137.26M | 150.98M | 90.97M (1.51×) | 97.25M (1.41×) |
-| 뒤에 5% 추가 | 85.48M | 38.75M | 24.66M (3.47×) | 28.76M (2.97×) |
-| 거리 버킷 | 114.67M | 164.06M | 142.81M (0.80×) | 139.54M (0.82×) |
-| 대부분 내림차순 | 23.68M | 40.15M | 110.38M (0.21×) | 17.14M (1.38×) |
-| 가우시안 유사 | 207.85M | 259.24M | 142.79M (1.46×) | 139.30M (1.49×) |
-| 오르간 파이프 | 246.65M | 34.95M | 61.74M (3.99×) | 61.05M (4.04×) |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>워크로드</th>
+      <th scope="col" align="right"><code>std::sort</code></th>
+      <th scope="col" align="right"><code>std::stable_sort</code></th>
+      <th scope="col" align="right" nowrap>경계 축소 병합</th>
+      <th scope="col" align="right" nowrap>타일 핑퐁 병합</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left" nowrap>무작위 3D 거리</th><td>230.79M</td><td>278.63M</td><td>142.74M (1.62×)</td><td>139.40M (1.66×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>프레임 흔들림</th><td>137.26M</td><td>150.98M</td><td>90.97M (1.51×)</td><td>97.25M (1.41×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>뒤에 5% 추가</th><td>85.48M</td><td>38.75M</td><td>24.66M (3.47×)</td><td>28.76M (2.97×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>거리 버킷</th><td>114.67M</td><td>164.06M</td><td>142.81M (0.80×)</td><td>139.54M (0.82×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>대부분 내림차순</th><td>23.68M</td><td>40.15M</td><td>110.38M (0.21×)</td><td>17.14M (1.38×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>가우시안 유사</th><td>207.85M</td><td>259.24M</td><td>142.79M (1.46×)</td><td>139.30M (1.49×)</td></tr>
+    <tr><th scope="row" align="left" nowrap>오르간 파이프</th><td>246.65M</td><td>34.95M</td><td>61.74M (3.99×)</td><td>61.05M (4.04×)</td></tr>
+  </tbody>
+</table>
 
 불리한 결과도 중요합니다. 중복 키가 많은 거리 버킷에서는 두 병합 구현 모두 `std::sort`보다 많은 사이클을 사용합니다. 대부분 내림차순인 입력에서는 경계 축소 병합이 약 **4.66배의 사이클**을 사용합니다. 오르간 파이프에서는 `std::stable_sort`가 두 구현보다 낫습니다. 모든 워크로드에서 이기는 알고리즘은 없습니다.
 
@@ -269,11 +369,22 @@ Idea 4의 64바이트 리프와 8 KiB 타일 핑퐁 병합까지 구현하고 �
 
 위의 무작위 3D 거리 워크로드를 자세히 보면 다음과 같습니다.
 
-| 알고리즘 | IPC | L1D 읽기 적중률 | L1D 읽기 미스 수 | 분기 예측 적중률 |
-| --- | ---: | ---: | ---: | ---: |
-| `std::sort` | 0.63 | 97.83% | 662,145 | 75.54% |
-| `boundary_trimmed_merge` | 2.19 | 95.11% | 2,020,305 | 95.02% |
-| `tiled_pingpong_merge` | 2.21 | 96.93% | 1,256,029 | 94.89% |
+<table>
+  <thead>
+    <tr>
+      <th scope="col" align="left" nowrap>알고리즘</th>
+      <th scope="col" align="right">IPC</th>
+      <th scope="col" align="right" nowrap>L1D 읽기 적중률</th>
+      <th scope="col" align="right" nowrap>L1D 읽기 미스 수</th>
+      <th scope="col" align="right" nowrap>분기 예측 적중률</th>
+    </tr>
+  </thead>
+  <tbody align="right">
+    <tr><th scope="row" align="left"><code>std::sort</code></th><td>0.63</td><td>97.83%</td><td>662,145</td><td>75.54%</td></tr>
+    <tr><th scope="row" align="left"><code>boundary_trimmed_merge</code></th><td>2.19</td><td>95.11%</td><td>2,020,305</td><td>95.02%</td></tr>
+    <tr><th scope="row" align="left"><code>tiled_pingpong_merge</code></th><td>2.21</td><td>96.93%</td><td>1,256,029</td><td>94.89%</td></tr>
+  </tbody>
+</table>
 
 두 병합 구현은 사이클이 적고 IPC와 분기 예측 적중률이 높지만, **L1D 읽기 미스는 더 많고 읽기 적중률은 낮습니다**. 이 결과만으로 캐시 동작 개선이 사이클 감소의 원인이라고 단정할 수 없습니다. 알고리즘마다 접근 횟수라는 분모도 다르므로, 비율과 절대 횟수를 함께 봐야 합니다.
 

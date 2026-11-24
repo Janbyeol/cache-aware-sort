@@ -42,7 +42,9 @@
 ### 병목 ②: 단방향 SIMD 비토닉 병합의 `carry` 레지스터 직렬 의존성 (21 사이클 지연 바닥)
 두 정렬된 배열을 SIMD 비토닉 병합기로 합칠 때 한 방향(앞에서 뒤)으로만 진행하면 매 반복마다:
 
-$$\text{merge\_vec}(\text{next\_vec}, \text{carry}) \rightarrow (\text{out\_low}, \text{new\_carry})$$
+```math
+\text{merge\_vec}(\text{next\_vec}, \text{carry}) \rightarrow (\text{out\_low}, \text{new\_carry})
+```
 
 를 계산해야 합니다. 다음 반복의 비토닉 병합은 이전 반복의 `new_carry`가 나와야만 시작될 수 있습니다.
 - **ARM64 NEON 실측 검증**: `neon.s` 분석 결과, `Network<Neon>::merge`는 1회 반복(원소 4개 = 16B 출력)마다 단일 `carry` 벡터가 **역순 뒤집기(`rev64` + `ext`, 2명령어) + 2단계 바이트닉 버터플라이(9명령어) = 총 11개 NEON 명령어(직렬 지연 시간 \~21 사이클)**를 통과해야 했습니다.

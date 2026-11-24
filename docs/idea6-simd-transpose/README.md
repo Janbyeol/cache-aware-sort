@@ -38,7 +38,9 @@ This document details the hypothesis, assembly-level microarchitectural and comp
 ### Bottleneck ②: Single-Chain Loop-Carried `carry` Dependency (21-Cycle Latency Floor on NEON)
 In a single-direction SIMD bitonic merge loop:
 
-$$\text{merge\_vec}(\text{next\_vec}, \text{carry}) \rightarrow (\text{out\_low}, \text{new\_carry})$$
+```math
+\text{merge\_vec}(\text{next\_vec}, \text{carry}) \rightarrow (\text{out\_low}, \text{new\_carry})
+```
 
 each iteration cannot begin until the previous iteration's `new_carry` exits the full bitonic network.
 - **ARM64 NEON Assembly Verification**: In `neon.s`, `Network<Neon>::merge` had a serial `carry` dependency chain of **11 NEON instructions (\~21 cycles latency)** per 4 elements (16B): 2 instructions for vector reversal (`rev64` + `ext`) and 9 instructions for two bitonic butterfly stages.
